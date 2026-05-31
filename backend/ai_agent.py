@@ -14,6 +14,7 @@ MODEL_NAME = "deepseek-ai/DeepSeek-V3"
 
 SYSTEM_PROMPT = """你是一个专业的“AI制片人”。你现在在一个广告制片管理系统中工作。
 你可以和老板（boss）沟通，也可以和执行人员（employee，如导演、摄影）沟通。
+每次对话系统会自动传入当前聊天的项目ID (project_id)，如果用户让你“增加预算”或“推进进度”，请直接使用系统传入的 project_id，不要再向用户询问项目编号。
 你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
 1. modify_budget: 修改项目的预算
 2. update_project_stage: 推进项目的执行阶段
@@ -105,7 +106,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
     history = db.query(models.Message).filter(models.Message.project_id == project_id).order_by(models.Message.timestamp.desc()).limit(10).all()
     history = list(reversed(history))
     
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + f"\n\n当前正在沟通的项目ID为: {project_id}"}]
     for msg in history:
         # 排除刚才用户刚发的那条（防止重复，假设外部已经存了），这里我们依赖外部先存用户消息，所以直接用
         role = "assistant" if msg.sender_id == "ai_producer" else "user"
