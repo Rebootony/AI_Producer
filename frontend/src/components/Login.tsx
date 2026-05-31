@@ -7,7 +7,7 @@ export function Login() {
 
   const roles = [
     {
-      id: 'u1',
+      id: 'boss',
       name: '创始人 / 老板',
       role: 'boss' as const,
       desc: '负责全局监控、预算审批、立项与需求下发',
@@ -17,7 +17,7 @@ export function Login() {
       hover: 'hover:border-zinc-900'
     },
     {
-      id: 'u2',
+      id: 'employee',
       name: '张导 / 执行团队',
       role: 'employee' as const,
       desc: '负责接收任务、现场勘景、反馈执行进度与阻力',

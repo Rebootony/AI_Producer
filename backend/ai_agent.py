@@ -7,18 +7,24 @@ import models
 
 load_dotenv()
 
-# 建议在运行前通过环境变量设置 API_KEY
-API_KEY = os.getenv("SILICONFLOW_API_KEY", "sk-your-siliconflow-api-key")
-client = OpenAI(api_key=API_KEY, base_url="https://api.siliconflow.cn/v1")
-MODEL_NAME = "deepseek-ai/DeepSeek-V3"
+BASE_URL = os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
+API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B") #免费
+
+if not API_KEY:
+    API_KEY = "ollama"
+
+client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 SYSTEM_PROMPT = """你是一个专业的“AI制片人”。你现在在一个广告制片管理系统中工作。
-你可以和老板（boss）沟通，也可以和执行人员（employee，如导演、摄影）沟通。
-每次对话系统会自动传入当前聊天的项目ID (project_id)，如果用户让你“增加预算”或“推进进度”，请直接使用系统传入的 project_id，不要再向用户询问项目编号。
+当前 Demo 只有两个真实角色：老板（boss）与员工（employee）。其它角色为占位符，不参与真实流程。
+你可以和老板沟通，也可以和员工沟通。每次对话系统会自动传入当前聊天的项目ID (project_id)，如果用户让你“增加预算”或“推进进度”，请直接使用系统传入的 project_id，不要再向用户询问项目编号。
+当老板要求你“询问员工/催促/转达”时，请主动调用 transfer_message 向员工发起会话；当员工给出回复时，请将核心信息回传给老板。
 你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
 1. modify_budget: 修改项目的预算
 2. update_project_stage: 推进项目的执行阶段
 3. transfer_message: 向不在场的其他角色传话或派发任务
+4. get_project_status: 获取当前项目预算与阶段信息
 
 你的回复应当专业、简洁、像真实的制片人。当需要修改预算或推进进度，或向他人传话时，请调用相应的工具。
 """
@@ -71,6 +77,21 @@ tools = [
             }
         }
     }
+    ,
+    {
+        "type": "function",
+        "function": {
+            "name": "get_project_status",
+            "description": "获取项目当前预算与阶段信息",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"}
+                },
+                "required": ["project_id"]
+            }
+        }
+    }
 ]
 
 def execute_function_call(name: str, args: dict, db: Session):
@@ -89,15 +110,20 @@ def execute_function_call(name: str, args: dict, db: Session):
             return f"项目阶段已更新为：{args['new_stage']}"
         return "找不到该项目"
     elif name == "transfer_message":
-        # AI 代为发消息给目标角色
         ai_msg = models.Message(
             project_id=args["project_id"],
             sender_id="ai_producer",
-            content=f"【传达给 {args['target_role']}】：{args['content']}"
+            content=f"【传达给 {args['target_role']}】：{args['content']}",
+            target_role=args["target_role"]
         )
         db.add(ai_msg)
         db.commit()
         return f"已成功向 {args['target_role']} 传达消息。"
+    elif name == "get_project_status":
+        project = db.query(models.Project).filter(models.Project.id == args["project_id"]).first()
+        if project:
+            return f"项目 {project.id} 当前预算为 {project.budget}，阶段为 {project.status}。"
+        return "找不到该项目"
     
     return "未知函数"
 

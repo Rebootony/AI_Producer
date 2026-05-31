@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from typing import Optional
 from database import engine, Base, get_db
 import models
 
@@ -44,6 +46,11 @@ class ChatRequest(BaseModel):
     role: str # 'boss' 或 'employee'
     project_id: str = "demo_project"
 
+class RelayRequest(BaseModel):
+    project_id: str
+    target_role: str
+    content: str
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "AI Producer Backend is running."}
@@ -56,8 +63,11 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     raise HTTPException(status_code=404, detail="Project not found")
 
 @app.get("/api/messages/{project_id}")
-def get_messages(project_id: str, db: Session = Depends(get_db)):
-    messages = db.query(models.Message).filter(models.Message.project_id == project_id).order_by(models.Message.timestamp.asc()).all()
+def get_messages(project_id: str, role: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Message).filter(models.Message.project_id == project_id)
+    if role:
+        query = query.filter(or_(models.Message.target_role == None, models.Message.target_role == role))
+    messages = query.order_by(models.Message.timestamp.asc()).all()
     return {"messages": [{"role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
 
 from ai_agent import chat_with_llm
@@ -68,7 +78,7 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     处理与大模型的对话，并维持记忆
     """
     # 存入用户消息
-    user_msg = models.Message(project_id=req.project_id, sender_id=req.user_id, content=req.message)
+    user_msg = models.Message(project_id=req.project_id, sender_id=req.user_id, content=req.message, target_role=req.role)
     db.add(user_msg)
     db.commit()
     
@@ -76,11 +86,43 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     reply = chat_with_llm(req.message, req.user_id, req.project_id, db)
     
     # 存入 AI 回复
-    ai_msg = models.Message(project_id=req.project_id, sender_id="ai_producer", content=reply)
+    ai_msg = models.Message(project_id=req.project_id, sender_id="ai_producer", content=reply, target_role=req.role)
     db.add(ai_msg)
     db.commit()
+
+    if req.role == "employee":
+        boss_msg = models.Message(
+            project_id=req.project_id,
+            sender_id="ai_producer",
+            content=f"【员工回复回传】{req.message}",
+            target_role="boss"
+        )
+        db.add(boss_msg)
+        db.commit()
     
     return {"reply": reply}
+
+@app.post("/api/relay")
+def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):
+    ai_to_target = models.Message(
+        project_id=req.project_id,
+        sender_id="ai_producer",
+        content=req.content,
+        target_role=req.target_role
+    )
+    db.add(ai_to_target)
+
+    if req.target_role == "employee":
+        boss_notice = models.Message(
+            project_id=req.project_id,
+            sender_id="ai_producer",
+            content=f"【AI已主动联系员工】{req.content}",
+            target_role="boss"
+        )
+        db.add(boss_notice)
+
+    db.commit()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

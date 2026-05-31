@@ -1,4 +1,5 @@
 venv/
 sql_app.db
+sql_app_demo.db
 __pycache__/
 .env

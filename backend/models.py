@@ -24,6 +24,7 @@ class Message(Base):
     project_id = Column(String, ForeignKey("projects.id"))
     sender_id = Column(String, ForeignKey("users.id"))
     content = Column(String)
+    target_role = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     
     project = relationship("Project", back_populates="messages")

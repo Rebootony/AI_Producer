@@ -4,7 +4,7 @@ import { cn } from '../utils';
 import { Send, Bot, User, Paperclip, Loader2 } from 'lucide-react';
 
 export function ChatSidebar() {
-  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject, projects } = useStore();
+  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -12,15 +12,21 @@ export function ChatSidebar() {
   const fetchMessages = async () => {
     const projectId = currentProjectId || 'demo_project';
     try {
-      const res = await fetch(`/api/messages/${projectId}`);
+      const roleParam = currentUser ? `?role=${currentUser.role}` : '';
+      const res = await fetch(`/api/messages/${projectId}${roleParam}`);
       if (res.ok) {
         const data = await res.json();
-        setMessages(data.messages.map((m: any, index: number) => ({
+        const mapped = data.messages.map((m: any, index: number) => ({
           id: index.toString(),
-          role: m.role === 'user' || m.role === 'boss' || m.role === 'employee' ? 'user' : 'ai',
+          role: currentUser && m.user_id === currentUser.id ? 'user' : 'ai',
           content: m.content,
           timestamp: new Date(m.timestamp)
-        })));
+        }));
+        if (mapped.length === 0) {
+          setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片人。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
+        } else {
+          setMessages(mapped);
+        }
       }
     } catch (e) {
       console.error('Failed to fetch messages', e);
@@ -28,8 +34,10 @@ export function ChatSidebar() {
   };
 
   useEffect(() => {
-    fetchMessages();
-  }, [currentProjectId]);
+    if (currentUser) {
+      fetchMessages();
+    }
+  }, [currentProjectId, currentUser]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -71,6 +79,27 @@ export function ChatSidebar() {
       }
     } catch (error) {
       addMessage({ role: 'ai', content: '（网络错误，无法连接后端模型服务）' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRelayToEmployee = async () => {
+    if (!currentUser || currentUser.role !== 'boss') return;
+    setLoading(true);
+    try {
+      await fetch('/api/relay', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          project_id: currentProjectId || 'demo_project',
+          target_role: 'employee',
+          content: '请在今天18:00前回复排期进度与下一步风险点。'
+        })
+      });
+      fetchMessages();
     } finally {
       setLoading(false);
     }
@@ -123,6 +152,19 @@ export function ChatSidebar() {
 
       {/* Input */}
       <div className="p-4 bg-white border-t border-zinc-200">
+        {currentUser?.role === 'boss' && (
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-xs text-zinc-500">AI 主动发起会话</span>
+            <button
+              type="button"
+              onClick={handleRelayToEmployee}
+              disabled={loading}
+              className="text-xs px-3 py-1.5 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              向员工追问排期
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSend} className="relative flex items-center">
           <button 
             type="button" 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '../../utils';
 import { Project } from '../../store/useStore';
 import { CheckCircle2, MessageSquare, AlertCircle } from 'lucide-react';
@@ -50,6 +50,10 @@ const timelineData = [
 ];
 
 export function TimelineTab({ project }: { project: Project }) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  const selectedItem = selectedIndex !== null ? timelineData[selectedIndex] : null;
+
   return (
     <div className="p-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="mb-8">
@@ -77,6 +81,15 @@ export function TimelineTab({ project }: { project: Project }) {
                 <span className="text-sm font-medium text-zinc-500 bg-zinc-100 px-3 py-1 rounded-full">
                   {item.date}
                 </span>
+              </div>
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={() => setSelectedIndex(idx)}
+                  className="text-xs px-3 py-1.5 rounded-full border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300"
+                >
+                  查看详情
+                </button>
               </div>
 
               {/* Tasks List */}
@@ -142,6 +155,57 @@ export function TimelineTab({ project }: { project: Project }) {
           </div>
         ))}
       </div>
+
+      {selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-xl bg-white rounded-2xl p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-zinc-900">{selectedItem.week} 详情</h3>
+                <p className="text-sm text-zinc-500">{selectedItem.date}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedIndex(null)}
+                className="text-zinc-500 hover:text-zinc-800"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-sm font-medium text-zinc-700 mb-2">阶段任务</p>
+              <ul className="space-y-2 text-sm text-zinc-600">
+                {selectedItem.tasks.map((task, i) => (
+                  <li key={i}>• {task}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-sm font-medium text-zinc-700 mb-2">AI 述职摘要</p>
+              <p className="text-sm text-zinc-600">{selectedItem.aiSummary}</p>
+            </div>
+
+            {selectedItem.feedbacks.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-zinc-700 mb-2">执行层反馈</p>
+                <div className="space-y-2 text-sm text-zinc-600">
+                  {selectedItem.feedbacks.map((fb, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <span className="text-zinc-400">{fb.time}</span>
+                      <span>
+                        <span className={cn("font-medium", fb.role.includes('AI') ? "text-blue-600" : "text-zinc-700")}>{fb.role}</span>
+                        ：{fb.content}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
