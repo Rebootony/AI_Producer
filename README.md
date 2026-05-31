@@ -1,0 +1,80 @@
+# AI 制片人 (AI Producer) - 本地全栈运行指南
+
+本项目分为前端（React + Vite）和后端（Python + FastAPI）。通过前后端联动，实现 AI 虚拟制片人与不同角色（老板、员工）的动态交互。
+
+## 目录结构
+- `/frontend` - 前端界面代码
+- `/backend` - 后端逻辑及大模型连接代码
+
+---
+
+## 一、启动后端服务 (Backend)
+
+后端提供了 API 接口，并负责连接硅基流动（SiliconFlow）大模型、管理历史记忆以及执行功能调用（Function Calling）。
+
+### 准备工作
+请确保您的电脑已经安装了 **Python 3.8** 或以上版本。
+
+### Windows 系统启动步骤
+1. 打开命令提示符（cmd）或 PowerShell，进入 `backend` 目录：
+   ```cmd
+   cd producer\backend
+   ```
+2. （推荐）创建并激活虚拟环境：
+   ```cmd
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
+3. 安装依赖包：
+   ```cmd
+   pip install -r requirements.txt
+   ```
+4. 启动服务：
+   ```cmd
+   python main.py
+   ```
+   *服务将运行在 http://127.0.0.1:8000*
+
+### Mac 系统启动步骤
+1. 打开终端（Terminal），进入 `backend` 目录：
+   ```bash
+   cd producer/backend
+   ```
+2. （推荐）创建并激活虚拟环境：
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+3. 安装依赖包：
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+4. 启动服务：
+   ```bash
+   python3 main.py
+   ```
+   *服务将运行在 http://127.0.0.1:8000*
+
+---
+
+## 二、启动前端服务 (Frontend)
+
+前端提供了可视化的聊天界面与动态工作台。
+
+### 准备工作
+请确保您的电脑已经安装了 **Node.js** (推荐 v18+)。
+
+### Windows / Mac 通用启动步骤
+1. 打开新的终端窗口，进入 `frontend` 目录：
+   ```bash
+   cd producer/frontend
+   ```
+2. 安装依赖（首次运行需要）：
+   ```bash
+   npm install
+   ```
+3. 启动开发服务器：
+   ```bash
+   npm run dev
+   ```
+   *服务将运行在 http://localhost:5173，在浏览器中打开此地址即可体验。*
