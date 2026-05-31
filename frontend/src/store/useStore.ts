@@ -60,6 +60,7 @@ interface AppState {
   updateProject: (id: string, data: Partial<Project>) => void;
   
   messages: Message[];
+  setMessages: (messages: Message[]) => void;
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void;
 
   team: TeamMember[];
@@ -123,14 +124,8 @@ export const useStore = create<AppState>((set) => ({
     projects: state.projects.map(p => p.id === id ? { ...p, ...data } : p)
   })),
 
-  messages: [
-    {
-      id: '1',
-      role: 'ai',
-      content: '你好！我是你的AI制片人。欢迎来到全局工作台。今天有什么我可以帮您的？您可以让我帮您跟进已有项目，或者上传新Brief让我为您直接立项。',
-      timestamp: new Date(),
-    }
-  ],
+  messages: [],
+  setMessages: (messages) => set({ messages }),
   addMessage: (msg) => set((state) => ({
     messages: [
       ...state.messages,

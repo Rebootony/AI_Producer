@@ -20,8 +20,8 @@
   - **状态**: `completed`
   - **详情**: 在后端开发 `modify_budget` (修改预算)、`update_project_stage` (推进阶段)、`transfer_message` (跨角色传话) 三个工具并供 AI 调用。
 
-- [ ] **Todo 5: 前后端全链路联调**
-  - **状态**: `pending`
+- [x] **Todo 5: 前后端全链路联调**
+  - **状态**: `completed`
   - **详情**: 将前端的“角色登录系统”和“Chat 交互”与后端 API 真实连通，跑通创始人“一人分饰两角（老板/员工）”的演示沙盒。
 
 - [ ] **Todo 6: 云端环境部署配置**

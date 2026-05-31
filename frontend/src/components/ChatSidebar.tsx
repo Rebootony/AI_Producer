@@ -1,65 +1,79 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils';
-import { Send, Bot, User, Paperclip } from 'lucide-react';
+import { Send, Bot, User, Paperclip, Loader2 } from 'lucide-react';
 
 export function ChatSidebar() {
-  const { messages, addMessage, addProject, setCurrentProject, updateProject, currentProjectId, projects, view } = useStore();
+  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject, projects } = useStore();
   const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchMessages = async () => {
+    const projectId = currentProjectId || 'demo_project';
+    try {
+      const res = await fetch(`/api/messages/${projectId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages.map((m: any, index: number) => ({
+          id: index.toString(),
+          role: m.role === 'user' || m.role === 'boss' || m.role === 'employee' ? 'user' : 'ai',
+          content: m.content,
+          timestamp: new Date(m.timestamp)
+        })));
+      }
+    } catch (e) {
+      console.error('Failed to fetch messages', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchMessages();
+  }, [currentProjectId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !currentUser) return;
 
-    addMessage({ role: 'user', content: input });
     const userText = input.trim();
+    addMessage({ role: 'user', content: userText });
     setInput('');
+    setLoading(true);
 
-    setTimeout(() => {
-      // Mock "Create Project" flow for Investor Demo
-      if (userText.includes('新建') || userText.includes('新项目')) {
-        const newProject = {
-          id: 'p3',
-          name: '运动装备夏季TVC',
-          client: '某知名运动品牌',
-          industry: '体育服饰',
-          budget: 500000,
-          usedBudget: 0,
-          days: 45,
-          deliveryDate: '6月10日',
-          status: 'planning' as const,
-          health: 'good' as const
-        };
-        addProject(newProject);
-        addMessage({
-          role: 'ai',
-          content: '收到！我已经为您自动解析需求，并成功创建了新项目《运动装备夏季TVC》。项目预算50万，交付期6月10日。正在为您切换到该项目工作台...'
-        });
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: userText,
+          user_id: currentUser.id,
+          role: currentUser.role,
+          project_id: currentProjectId || 'demo_project'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        addMessage({ role: 'ai', content: data.reply });
         
-        setTimeout(() => {
-          setCurrentProject('p3');
-        }, 1500);
-      } 
-      // Context aware logic based on active view/project
-      else if (currentProjectId === 'p1' && (userText.includes('加一天') || userText.includes('增加一天'))) {
-        updateProject('p1', { budget: 300000, usedBudget: 115000 + 5500 });
-        addMessage({
-          role: 'ai',
-          content: '收到。增加一天拍摄，导演和摄影成本将增加 5500 元。我已经更新了右侧的预算看板，目前项目仍然在安全预算内。'
-        });
-      } 
-      else {
-        addMessage({
-          role: 'ai',
-          content: `（纯前端演示环境，未连接大模型）我已经收到您的消息：“${userText}”。后续接入大模型后，我将能真正理解您的意图并做出专业判断。`
-        });
+        // Fetch project to see if budget/stage changed
+        const projectRes = await fetch(`/api/projects/${currentProjectId || 'demo_project'}`);
+        if (projectRes.ok) {
+           const pData = await projectRes.json();
+           updateProject(currentProjectId || 'p1', { budget: pData.budget, status: pData.status === 'planning' ? 'planning' : 'in_progress' });
+        }
       }
-    }, 1000);
+    } catch (error) {
+      addMessage({ role: 'ai', content: '（网络错误，无法连接后端模型服务）' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -125,10 +139,10 @@ export function ChatSidebar() {
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={!input.trim() || loading}
             className="absolute right-2 p-1.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Send size={16} />
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
         </form>
       </div>

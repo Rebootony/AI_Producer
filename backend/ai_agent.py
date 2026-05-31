@@ -2,7 +2,10 @@ import json
 import os
 from openai import OpenAI
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 import models
+
+load_dotenv()
 
 # 建议在运行前通过环境变量设置 API_KEY
 API_KEY = os.getenv("SILICONFLOW_API_KEY", "sk-your-siliconflow-api-key")
