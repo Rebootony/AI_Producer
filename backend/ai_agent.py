@@ -139,61 +139,38 @@ def parse_budget_target(message: str) -> Optional[float]:
     return None
 
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
-    # 严格判断是否是添加规则指令
-    if "以后都叫我" in user_message or "以后请叫我" in user_message or "请记住规则" in user_message:
+    is_rule = False
+    if ("以后都叫我" in user_message or "以后请叫我" in user_message or "请记住规则" in user_message) and not any(k in user_message for k in ["看看", "落后", "进度"]):
         is_rule = True
             
     if is_rule:
-        content = add_user_preference(user_message)
-        content = f"好的，{content}"
-        log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
-        return content
+        # 特别防止老板问“张导进度”这类话被大模型误判为保存规则
+        if user_id == "boss" and any(k in user_message for k in ["看看", "张导", "落后", "进度"]):
+            pass
+        else:
+            content = add_user_preference(user_message)
+            content = f"好的，{content}"
+            log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
+            return content
 
     if not SUPPORTS_FUNCTIONS:
-        if any(key in user_message for key in ["单位", "什么单位"]):
-            project = db.query(models.Project).filter(models.Project.id == project_id).first()
-            if project:
-                return f"预算单位为人民币元，当前预算为 {project.budget} 元（约 {project.budget / 10000:.1f} 万）。"
-            return "找不到该项目"
-
-        if "预算" in user_message and any(key in user_message for key in ["改为", "修改", "调整", "改成", "变更"]):
-            target = parse_budget_target(user_message)
-            project = db.query(models.Project).filter(models.Project.id == project_id).first()
-            if project and target is not None:
-                delta = target - project.budget
-                return execute_function_call("modify_budget", {"project_id": project_id, "amount": delta, "reason": "手动调整预算"}, session_id, db)
-            return "找不到该项目"
-
-        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]):
-            return execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
-
-        if any(key in user_message for key in ["阶段", "排期"]) and not any(k in user_message for k in ["催", "看看", "落后", "张导"]):
-            return execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
-
-        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问", "联系", "看看", "落后"]):
-            target_role = "employee" if user_id == "boss" else "boss"
-            
-            # 如果是老板发起的指令
-            if user_id == "boss":
-                if "催" in user_message:
-                    return execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
-                if "风险" in user_message or "困难" in user_message:
-                    return execute_function_call("ask_employee_risk", {"project_id": project_id}, session_id, db)
-                if "进度" in user_message or "排期" in user_message or "落后" in user_message:
-                    return execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
-            
-            return execute_function_call(
-                "transfer_message",
-                {"project_id": project_id, "target_role": target_role, "content": user_message},
-                session_id,
-                db
-            )
-
-        # 在没有开启 SUPPORTS_FUNCTIONS 的情况下，如果老板询问员工相关进度，也应当返回固定的提示，避免出现假回复
-        if user_id == "boss" and any(key in user_message for key in ["看看", "落后", "张导进度", "催", "问"]):
-             # 模拟工具调用的行为
-             execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
-             return "好的，我已经向员工发送了指令，请等待员工回复。"
+        pass
+    else:
+        # 针对支持 Function calling 的情况，我们要防止大模型自己决定不调工具，直接生成假回复。
+        # 如果老板提到了这几个词，强制不走大模型，直接走工具并返回。
+        if user_id == "boss" and any(key in user_message for key in ["传达", "转达", "告诉", "催", "问", "联系", "看看", "落后", "张导"]):
+            if "催" in user_message:
+                execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
+                return "好的，我已经向员工发送了指令，请等待员工回复。"
+            if "风险" in user_message or "困难" in user_message:
+                execute_function_call("ask_employee_risk", {"project_id": project_id}, session_id, db)
+                return "好的，我已经向员工发送了指令，请等待员工回复。"
+            if "进度" in user_message or "排期" in user_message or "落后" in user_message or "看看" in user_message:
+                execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
+                return "好的，我已经向员工发送了指令，请等待员工回复。"
+                
+            execute_function_call("transfer_message", {"project_id": project_id, "target_role": "employee", "content": user_message}, session_id, db)
+            return "好的，我已经向员工发送了指令，请等待员工回复。"
 
     # 1. 获取历史记录（最近10条）
     history = db.query(models.Message).filter(
@@ -282,12 +259,26 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             # 那么给老板的回复必须是死板的确认，绝不能是虚假的进度。
             if user_id == "boss" and any(t in tools_used for t in ["ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery", "schedule_internal_meeting", "provide_client_feedback"]):
                 content = "好的，我已经向员工发送了指令，请等待员工回复。"
+                
+            # 补充：修复因为偏好设置错误触发导致返回假信息的 BUG
+            if user_id == "boss" and "save_user_preference" in tools_used and not is_rule:
+                # 如果大模型误触发了保存偏好，并且刚才拦截了 ask_employee_schedule 等工具，也可能在这里出问题。
+                # 我们重新检查用户意图，如果是问进度，强制走询问逻辑。
+                if any(k in user_message for k in ["看看", "张导", "落后", "进度"]):
+                    execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
+                    content = "好的，我已经向员工发送了指令，请等待员工回复。"
+                    tools_used = ["ask_employee_schedule"]
             
             # 日志记录
             log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
-        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]) and not any(k in user_message for k in ["催", "看看", "张导", "落后"]):
+        if any(key in user_message for key in ["阶段", "排期", "进度"]) and not any(k in user_message for k in ["催", "看看", "落后", "张导", "问", "员工"]):
+            content = execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
+            log_interaction(project_id, user_id, user_message, content, ["get_project_timeline_fallback"])
+            return content
+
+        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]) and not any(k in user_message for k in ["催", "看看", "张导", "落后", "问"]):
             content = execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
             log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
             return content
