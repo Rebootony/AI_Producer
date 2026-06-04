@@ -51,49 +51,44 @@
 
 ```mermaid
 graph TD
-    %% 用户层
-    User[用户: 老板/员工] <-->|自然语言输入/输出| Frontend[前端 Dashboard (React/Vite)]
+    User["用户: 老板/员工"] <-->|"自然语言输入/输出"| Frontend["前端 Dashboard (React/Vite)"]
     
-    %% 后端入口
-    Frontend <-->|API/HTTP| Backend[后端 API (FastAPI)]
+    Frontend <-->|"API/HTTP"| Backend["后端 API (FastAPI)"]
     
-    %% AI Agent 核心
-    subgraph AI_Producer_Agent [AI 制片人 Agent]
-        Router[意图路由 & 提示词引擎]
-        LLM[大语言模型 Model<br>e.g. Qwen2.5 / DeepSeek]
+    subgraph AI_Producer_Agent ["AI 制片人 Agent"]
+        Router["意图路由 & 提示词引擎"]
+        LLM["大语言模型 Model (e.g. Qwen2.5 / DeepSeek)"]
         
-        Router -->|1. 发送上下文 & Tools 定义| LLM
-        LLM -->|2. 返回 Function Call 指令| Executor[技能执行器 Skill Executor]
-        Executor -->|3. 返回执行结果| LLM
-        LLM -->|4. 生成最终人类语言| Router
+        Router -->|"1. 发送上下文 & Tools 定义"| LLM
+        LLM -->|"2. 返回 Function Call 指令"| Executor["技能执行器 Skill Executor"]
+        Executor -->|"3. 返回执行结果"| LLM
+        LLM -->|"4. 生成最终人类语言"| Router
     end
     
     Backend <--> Router
     
-    %% Function Calling 技能库 (10 Skills)
-    subgraph Skills [Agent Skills / Functions]
-        S1[get_project_overview]
-        S2[get_budget_breakdown]
-        S3[modify_budget]
-        S4[get_project_timeline]
-        S5[update_project_stage]
-        S6[get_crew_info]
-        S7[update_crew_assignment]
-        S8[get_assets_list]
-        S9[add_project_asset]
-        S10[transfer_message]
+    subgraph Skills ["Agent Skills / Functions"]
+        S1["get_project_overview"]
+        S2["get_budget_breakdown"]
+        S3["modify_budget"]
+        S4["get_project_timeline"]
+        S5["update_project_stage"]
+        S6["get_crew_info"]
+        S7["update_crew_assignment"]
+        S8["get_assets_list"]
+        S9["add_project_asset"]
+        S10["transfer_message"]
     end
     
-    Executor -->|调用对应的 Tool| Skills
+    Executor -->|"调用对应的 Tool"| Skills
     
-    %% 数据库层
-    subgraph Database [SQLite DB / 状态存储]
-        DB_Proj[(Project Table)]
-        DB_Budget[(Budget Breakdown)]
-        DB_Crew[(Crew Table)]
-        DB_Assets[(Assets Table)]
-        DB_Msg[(Messages Table)]
+    subgraph Database ["SQLite DB / 状态存储"]
+        DB_Proj[("Project Table")]
+        DB_Budget[("Budget Breakdown")]
+        DB_Crew[("Crew Table")]
+        DB_Assets[("Assets Table")]
+        DB_Msg[("Messages Table")]
     end
     
-    Skills <-->|读写数据| Database
+    Skills <-->|"读写数据"| Database
 ```
