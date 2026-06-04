@@ -229,13 +229,21 @@ export function ChatSidebar() {
             )}>
               {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
             </div>
-            <div className={cn(
-              "p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
-              msg.role === 'user' 
-                ? "bg-zinc-800 text-white rounded-tr-sm" 
-                : "bg-white text-zinc-800 border border-zinc-100 rounded-tl-sm"
-            )}>
-              {msg.content}
+            <div className="flex flex-col">
+              <div className={cn(
+                "p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
+                msg.role === 'user' 
+                  ? "bg-zinc-800 text-white rounded-tr-sm" 
+                  : "bg-white text-zinc-800 border border-zinc-100 rounded-tl-sm"
+              )}>
+                {msg.content}
+              </div>
+              <span className={cn(
+                "text-[10px] text-zinc-400 mt-1",
+                msg.role === 'user' ? "text-right" : "text-left"
+              )}>
+                {msg.timestamp.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
           </div>
         ))}
@@ -244,19 +252,6 @@ export function ChatSidebar() {
 
       {/* Input */}
       <div className="p-4 bg-white border-t border-zinc-200">
-        {currentUser?.role === 'boss' && (
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs text-zinc-500">AI 主动发起会话</span>
-            <button
-              type="button"
-              onClick={handleRelayToEmployee}
-              disabled={loading}
-              className="text-xs px-3 py-1.5 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50"
-            >
-              向员工追问排期
-            </button>
-          </div>
-        )}
         <form onSubmit={handleSend} className="relative flex items-center">
           <button 
             type="button" 

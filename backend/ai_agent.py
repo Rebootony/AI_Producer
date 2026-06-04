@@ -32,10 +32,16 @@ tools = [
     {"type": "function", "function": {"name": "get_assets_list", "description": "获取已经产出并归档的项目交付物/资产列表", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "add_project_asset", "description": "记录新的资产文件上传或确认交付物已完成", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "asset_name": {"type": "string"}, "asset_type": {"type": "string"}}, "required": ["project_id", "asset_name", "asset_type"]}}},
     {"type": "function", "function": {"name": "transfer_message", "description": "向指定的其他角色传话", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_role": {"type": "string"}, "content": {"type": "string"}}, "required": ["project_id", "target_role", "content"]}}},
-    {"type": "function", "function": {"name": "save_user_preference", "description": "当用户提出长期的习惯、要求、回答格式等长期指令时调用此工具保存。例如'以后都叫我老板'、'以后回答要简短'。", "parameters": {"type": "object", "properties": {"preference": {"type": "string", "description": "需要长期保存的用户偏好指令"}}, "required": ["preference"]}}}
+    {"type": "function", "function": {"name": "save_user_preference", "description": "当用户提出长期的习惯、要求、回答格式等长期指令时调用此工具保存。例如'以后都叫我老板'、'以后回答要简短'。", "parameters": {"type": "object", "properties": {"preference": {"type": "string", "description": "需要长期保存的用户偏好指令"}}, "required": ["preference"]}}},
+    {"type": "function", "function": {"name": "ask_employee_schedule", "description": "向员工询问当前的排期进度与下一步计划", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "details": {"type": "string", "description": "补充说明"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "ask_employee_risk", "description": "向员工询问目前项目的风险点或困难", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "urge_employee_delivery", "description": "催促员工尽快完成并交付当前产出物", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "provide_client_feedback", "description": "向员工转达客户的修改意见或反馈", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "feedback": {"type": "string"}}, "required": ["project_id", "feedback"]}}},
+    {"type": "function", "function": {"name": "schedule_internal_meeting", "description": "通知员工安排内部开会或堪景等日程", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "meeting_info": {"type": "string"}}, "required": ["project_id", "meeting_info"]}}},
+    {"type": "function", "function": {"name": "report_to_boss", "description": "员工回复后，AI对内容进行自然语言处理并向老板汇报（附带员工原话在双引号内）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "report_content": {"type": "string", "description": "向老板汇报的内容，需将员工原话放在双引号内"}}, "required": ["project_id", "report_content"]}}}
 ]
 
-def execute_function_call(name: str, args: dict, db: Session):
+def execute_function_call(name: str, args: dict, session_id: str, db: Session):
     project = db.query(models.Project).filter(models.Project.id == args.get("project_id")).first()
     if not project and name != "transfer_message":
         return "找不到该项目"
@@ -78,11 +84,42 @@ def execute_function_call(name: str, args: dict, db: Session):
         db.commit()
         return f"已添加交付物: {args['asset_name']}"
     elif name == "transfer_message":
-        db.add(models.Message(project_id=args["project_id"], sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
+        db.add(models.Message(project_id=args["project_id"], session_id=session_id, sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
         db.commit()
         return f"已成功向 {args['target_role']} 传达消息。"
     elif name == "save_user_preference":
         return add_user_preference(args["preference"])
+    elif name == "ask_employee_schedule":
+        details = args.get("details", "")
+        content = f"【AI跟进排期】老板想了解目前的排期进度。{details}"
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.commit()
+        return "已向员工询问排期进度。"
+    elif name == "ask_employee_risk":
+        content = "【AI询问风险】老板询问目前项目是否有风险点或困难需要协调？"
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.commit()
+        return "已向员工询问项目风险。"
+    elif name == "urge_employee_delivery":
+        content = "【AI催促交付】老板催促尽快完成并交付当前的产出物，请加快进度。"
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.commit()
+        return "已向员工催促交付。"
+    elif name == "provide_client_feedback":
+        content = f"【AI转达客户反馈】老板发来了客户的最新反馈：{args.get('feedback')}"
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.commit()
+        return "已向员工转达客户反馈。"
+    elif name == "schedule_internal_meeting":
+        content = f"【AI会议安排】老板要求安排会议或日程：{args.get('meeting_info')}"
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.commit()
+        return "已向员工通知会议安排。"
+    elif name == "report_to_boss":
+        content = args.get("report_content")
+        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="boss"))
+        db.commit()
+        return "已成功向老板汇报。"
     
     return "未知函数"
 
@@ -119,20 +156,21 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             project = db.query(models.Project).filter(models.Project.id == project_id).first()
             if project and target is not None:
                 delta = target - project.budget
-                return execute_function_call("modify_budget", {"project_id": project_id, "amount": delta, "reason": "手动调整预算"}, db)
+                return execute_function_call("modify_budget", {"project_id": project_id, "amount": delta, "reason": "手动调整预算"}, session_id, db)
             return "找不到该项目"
 
         if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]):
-            return execute_function_call("get_project_overview", {"project_id": project_id}, db)
+            return execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
 
         if any(key in user_message for key in ["推进", "阶段", "进度", "排期"]):
-            return execute_function_call("get_project_timeline", {"project_id": project_id}, db)
+            return execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
 
         if any(key in user_message for key in ["传达", "转达", "告诉", "催促", "问一下", "联系"]):
             target_role = "employee" if user_id == "boss" else "boss"
             return execute_function_call(
                 "transfer_message",
                 {"project_id": project_id, "target_role": target_role, "content": user_message},
+                session_id,
                 db
             )
 
@@ -186,7 +224,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             
             tools_used.append(function_name)
             
-            function_response = execute_function_call(function_name, function_args, db)
+            function_response = execute_function_call(function_name, function_args, session_id, db)
             
             # 如果是特殊的无需总结的指令，或者直接返回
             if function_name == "save_user_preference":
@@ -217,7 +255,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             return content
 
         if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]):
-            content = execute_function_call("get_project_overview", {"project_id": project_id}, db)
+            content = execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
             log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
             return content
 

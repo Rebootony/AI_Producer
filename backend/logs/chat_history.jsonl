@@ -18,3 +18,9 @@
 {"timestamp": "2026-06-03T20:50:38.526553", "project_id": "p1", "user_id": "boss", "user_message": "以后都叫我大老板", "ai_response": "好的，已成功将指令“以后都叫我大老板”永久保存至系统的长期偏好中。", "tools_used": ["save_user_preference_fallback"]}
 {"timestamp": "2026-06-03T20:50:39.528281", "project_id": "p1", "user_id": "boss", "user_message": "你好，我是谁？", "ai_response": "我不太明白您的意思，您可以换个说法吗？", "tools_used": []}
 {"timestamp": "2026-06-03T20:50:39.531002", "project_id": "p1", "user_id": "boss", "user_message": "请保存一个规则：以后请叫我大老板。", "ai_response": "好的，已成功将指令“请保存一个规则：以后请叫我大老板。”永久保存至系统的长期偏好中。", "tools_used": ["save_user_preference_fallback"]}
+{"timestamp": "2026-06-03T21:00:42.362786", "project_id": "p1", "user_id": "boss", "user_message": "你好，你能做什么", "ai_response": "大老板，我这边能处理广告制片的日常事务，比如盯进度、调预算、安排人手啥的。您直接问就行，不用发指令，我懂的。", "tools_used": []}
+{"timestamp": "2026-06-03T21:01:54.463130", "project_id": "p1", "user_id": "boss", "user_message": "核心目标是什么", "ai_response": "\n\n大老板，项目核心目标是品牌升级与营销传播，总预算30万，周期一个月。", "tools_used": ["get_project_overview"]}
+{"timestamp": "2026-06-03T21:04:22.822457", "project_id": "p2", "user_id": "boss", "user_message": "预算翻个倍吧", "ai_response": "好的，找不到该项目", "tools_used": ["save_user_preference"]}
+{"timestamp": "2026-06-03T21:05:01.400608", "project_id": "p1", "user_id": "boss", "user_message": "预算可以翻倍", "ai_response": "\n\n大老板，预算已经翻倍到60万啦。需要调整人员或时间安排吗？", "tools_used": ["modify_budget"]}
+{"timestamp": "2026-06-03T21:05:22.409645", "project_id": "p1", "user_id": "boss", "user_message": "牛逼", "ai_response": "大老板，这波操作您满意就行，咱们冲就完事了！", "tools_used": []}
+{"timestamp": "2026-06-03T21:07:04.610640", "project_id": "p1", "user_id": "employee", "user_message": "快完成了", "ai_response": "大老板，目前项目在拍摄阶段，预计明天就能收工。后期团队已经就位，随时可以接手。", "tools_used": []}

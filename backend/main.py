@@ -147,17 +147,6 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
     db.add(ai_msg)
     db.commit()
-
-    if req.role == "employee":
-        boss_msg = models.Message(
-            project_id=req.project_id,
-            session_id=req.session_id,
-            sender_id="ai_producer",
-            content=f"【员工回复回传】{req.message}",
-            target_role="boss"
-        )
-        db.add(boss_msg)
-        db.commit()
     
     return {"reply": reply}
 
