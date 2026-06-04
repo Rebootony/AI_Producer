@@ -37,7 +37,7 @@ export function ChatSidebar() {
           timestamp: new Date(m.timestamp)
         }));
         if (mapped.length === 0) {
-          setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片人。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
+          setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
         } else {
           setMessages(mapped);
         }
@@ -153,7 +153,7 @@ export function ChatSidebar() {
             <Bot size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-800">AI 制片人</h2>
+            <h2 className="font-semibold text-zinc-800">AI 制片</h2>
             <p className="text-xs text-green-600 flex items-center">
               <span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span>
               随时在线

@@ -102,6 +102,12 @@ graph TD
         S8["get_assets_list"]
         S9["add_project_asset"]
         S10["transfer_message"]
+        S11["ask_employee_schedule"]
+        S12["ask_employee_risk"]
+        S13["urge_employee_delivery"]
+        S14["provide_client_feedback"]
+        S15["schedule_internal_meeting"]
+        S16["report_to_boss"]
     end
     
     Executor -->|"调用对应的 Tool"| Skills

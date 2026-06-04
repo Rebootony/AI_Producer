@@ -10,7 +10,7 @@ PROMPTS_DIR.mkdir(exist_ok=True)
 BASE_PROMPT_FILE = PROMPTS_DIR / "base_prompt.md"
 PREFS_FILE = PROMPTS_DIR / "user_preferences.md"
 
-DEFAULT_BASE_PROMPT = """你是一个专业的“AI制片人”，在广告制片管理系统中充当核心枢纽。
+DEFAULT_BASE_PROMPT = """你是一个专业的“AI制片”，在广告制片管理系统中充当核心枢纽。
 当前系统中只有两个真实角色：老板（boss）与员工（employee）。
 
 【角色扮演规则（极其重要）】：

@@ -261,6 +261,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 "content": function_response,
             })
             
+            # 第二次对话是为了生成自然的回复给当前用户
             second_response = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=messages,
@@ -270,6 +271,12 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 content = content[:1000] + "…"
             if not content:
                 content = "好的，已执行操作。"
+                
+            # 修正：当老板发指令让 AI 去问员工时，第二轮大模型有时会自作主张伪造一个“员工说：正常”。
+            # 我们必须强行拦截：如果工具调用是 ask_employee_* 或 urge_employee_* 等发给员工的，
+            # 那么给老板的回复必须是死板的确认，绝不能是虚假的进度。
+            if user_id == "boss" and any(t in tools_used for t in ["ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery", "schedule_internal_meeting", "provide_client_feedback"]):
+                content = "好的，我已经向员工发送了指令，请等待员工回复。"
             
             # 日志记录
             log_interaction(project_id, user_id, user_message, content, tools_used)
@@ -288,6 +295,12 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             
         # 日志记录
         log_interaction(project_id, user_id, user_message, content, tools_used)
+        
+        # 修正：当 AI 执行完工具后，如果返回的 content 就是函数的结果，那就不需要给发消息的人额外存一条奇怪的回复。
+        # 这里我们在 chat_with_llm 中返回内容。如果 content 是工具直接返回的字符串（比如 "已成功向老板汇报"），
+        # 并且用户是员工，那这句话其实是回复给员工确认的，没有问题。
+        # 但如果是老板说“看看进度是不是落后了”，工具返回 "已向员工询问排期进度。"
+        # 这句话应该回复给老板。之前出 Bug 是因为老板这边的上下文被污染了。
         return content
 
     except Exception as e:

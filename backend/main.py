@@ -27,7 +27,7 @@ def init_db(db: Session):
     if not db.query(models.User).first():
         boss = models.User(id="boss", role="boss", name="创始人/老板")
         employee = models.User(id="employee", role="employee", name="执行团队/张导")
-        ai = models.User(id="ai_producer", role="ai", name="AI 制片人")
+        ai = models.User(id="ai_producer", role="ai", name="AI 制片")
         db.add_all([boss, employee, ai])
 
     project = db.query(models.Project).filter(models.Project.id == "p1").first()
@@ -160,9 +160,14 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     # 实际上，如果工具已经被调用，工具内部会生成针对目标角色 (boss/employee) 的 message。
     # LLM 返回的 summary (reply) 应该是返回给当前请求者 (req.role) 的确认信息。
     
-    ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
-    db.add(ai_msg)
-    db.commit()
+    # 修复：如果是老板发起了让 AI 去催进度等指令，AI 会返回类似 "已向员工催促交付" 的总结。
+    # 老板看到这句话就行了，不需要再看到一条假的“张导说...”
+    # 如果是员工发消息，AI 调用了 report_to_boss，那个工具会直接生成一条发给老板的消息，
+    # 而这个 reply 就是回复给员工的 "好的，我已向老板汇报" 或者类似的话。
+    if reply:
+        ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
+        db.add(ai_msg)
+        db.commit()
     
     return {"reply": reply}
 
