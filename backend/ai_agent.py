@@ -140,7 +140,6 @@ def parse_budget_target(message: str) -> Optional[float]:
 
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
     # 严格判断是否是添加规则指令
-    is_rule = False
     if "以后都叫我" in user_message or "以后请叫我" in user_message or "请记住规则" in user_message:
         is_rule = True
             
@@ -168,10 +167,10 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]):
             return execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
 
-        if any(key in user_message for key in ["阶段", "排期"]) and "催" not in user_message:
+        if any(key in user_message for key in ["阶段", "排期"]) and not any(k in user_message for k in ["催", "看看", "落后", "张导"]):
             return execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
 
-        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问", "联系"]):
+        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问", "联系", "看看", "落后"]):
             target_role = "employee" if user_id == "boss" else "boss"
             
             # 如果是老板发起的指令
@@ -180,7 +179,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                     return execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
                 if "风险" in user_message or "困难" in user_message:
                     return execute_function_call("ask_employee_risk", {"project_id": project_id}, session_id, db)
-                if "进度" in user_message or "排期" in user_message:
+                if "进度" in user_message or "排期" in user_message or "落后" in user_message:
                     return execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
             
             return execute_function_call(
@@ -189,6 +188,12 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 session_id,
                 db
             )
+
+        # 在没有开启 SUPPORTS_FUNCTIONS 的情况下，如果老板询问员工相关进度，也应当返回固定的提示，避免出现假回复
+        if user_id == "boss" and any(key in user_message for key in ["看看", "落后", "张导进度", "催", "问"]):
+             # 模拟工具调用的行为
+             execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
+             return "好的，我已经向员工发送了指令，请等待员工回复。"
 
     # 1. 获取历史记录（最近10条）
     history = db.query(models.Message).filter(
@@ -282,7 +287,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
-        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]) and "催" not in user_message:
+        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]) and not any(k in user_message for k in ["催", "看看", "张导", "落后"]):
             content = execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
             log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
             return content
