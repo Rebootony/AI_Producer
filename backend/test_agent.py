@@ -49,7 +49,6 @@ if __name__ == "__main__":
             print("  python test_agent.py prompt")
     else:
         # 默认执行一个测试流程
-        test_chat("达梦这个项目总预算多少？", "boss")
-        test_chat("去催一下他们进度", "boss")
-        test_chat("明天就能交片", "employee")
+        test_chat("去问一下张导风险点", "boss")
+        test_chat("目前还没什么风险，明天可以顺利开拍", "employee")
         show_logs()

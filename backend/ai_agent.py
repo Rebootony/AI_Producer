@@ -91,27 +91,27 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         return add_user_preference(args["preference"])
     elif name == "ask_employee_schedule":
         details = args.get("details", "")
-        content = f"【AI跟进排期】老板想了解目前的排期进度。{details}"
+        content = f"【工作安排】目前的排期进度怎么样了？{details}"
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工询问排期进度。"
     elif name == "ask_employee_risk":
-        content = "【AI询问风险】老板询问目前项目是否有风险点或困难需要协调？"
+        content = "【进度跟进】目前项目有什么风险点或困难需要我这边协调解决的吗？"
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工询问项目风险。"
     elif name == "urge_employee_delivery":
-        content = "【AI催促交付】老板催促尽快完成并交付当前的产出物，请加快进度。"
+        content = "【催促交付】请尽快完成并交付当前的产出物，加快进度。"
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工催促交付。"
     elif name == "provide_client_feedback":
-        content = f"【AI转达客户反馈】老板发来了客户的最新反馈：{args.get('feedback')}"
+        content = f"【客户反馈】客户的最新反馈来了，注意按照这个修改：{args.get('feedback')}"
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工转达客户反馈。"
     elif name == "schedule_internal_meeting":
-        content = f"【AI会议安排】老板要求安排会议或日程：{args.get('meeting_info')}"
+        content = f"【会议安排】请注意一下接下来的会议或日程安排：{args.get('meeting_info')}"
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工通知会议安排。"
@@ -141,7 +141,7 @@ def parse_budget_target(message: str) -> Optional[float]:
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
     # 严格判断是否是添加规则指令
     is_rule = False
-    if "以后都叫我" in user_message or "以后请叫我" in user_message or "请记住" in user_message:
+    if "以后都叫我" in user_message or "以后请叫我" in user_message or "请记住规则" in user_message:
         is_rule = True
             
     if is_rule:
@@ -171,10 +171,18 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         if any(key in user_message for key in ["阶段", "排期"]) and "催" not in user_message:
             return execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
 
-        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问一下", "联系"]):
+        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问", "联系"]):
             target_role = "employee" if user_id == "boss" else "boss"
-            if "催" in user_message:
-                return execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
+            
+            # 如果是老板发起的指令
+            if user_id == "boss":
+                if "催" in user_message:
+                    return execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
+                if "风险" in user_message or "困难" in user_message:
+                    return execute_function_call("ask_employee_risk", {"project_id": project_id}, session_id, db)
+                if "进度" in user_message or "排期" in user_message:
+                    return execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
+            
             return execute_function_call(
                 "transfer_message",
                 {"project_id": project_id, "target_role": target_role, "content": user_message},
