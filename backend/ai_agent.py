@@ -43,7 +43,7 @@ tools = [
 
 def execute_function_call(name: str, args: dict, session_id: str, db: Session):
     project = db.query(models.Project).filter(models.Project.id == args.get("project_id")).first()
-    if not project and name != "transfer_message":
+    if not project and name not in ["transfer_message", "save_user_preference"]:
         return "找不到该项目"
 
     if name == "get_project_overview":
@@ -138,7 +138,13 @@ def parse_budget_target(message: str) -> Optional[float]:
     return None
 
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
+    # 严格判断是否是添加规则指令
+    is_rule = False
     if any(key in user_message for key in ["叫我", "以后", "记住", "偏好", "规则"]):
+        if not any(k in user_message for k in ["告诉", "传达", "催", "问", "跟进"]):
+            is_rule = True
+            
+    if is_rule:
         content = add_user_preference(user_message)
         content = f"好的，{content}"
         log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
@@ -162,10 +168,10 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]):
             return execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
 
-        if any(key in user_message for key in ["推进", "阶段", "进度", "排期"]):
+        if any(key in user_message for key in ["阶段", "排期"]) and "催" not in user_message:
             return execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
 
-        if any(key in user_message for key in ["传达", "转达", "告诉", "催促", "问一下", "联系"]):
+        if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问一下", "联系"]):
             target_role = "employee" if user_id == "boss" else "boss"
             return execute_function_call(
                 "transfer_message",
@@ -254,7 +260,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
-        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]):
+        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]) and "催" not in user_message:
             content = execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
             log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
             return content

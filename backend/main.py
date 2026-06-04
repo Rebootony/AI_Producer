@@ -124,7 +124,18 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
         models.Message.session_id == session_id
     )
     if role:
-        query = query.filter(or_(models.Message.target_role == None, models.Message.target_role == role))
+        # 如果是某个角色获取消息，他们能看到：
+        # 1. 目标角色是他们的消息 (target_role == role)
+        # 2. 目标角色是所有人/没有特定角色的消息 (target_role == None)
+        # 3. 发送者是他们自己的消息 (sender_id == role) -> 虽然通常发送给自己不需要过滤，但为了完整性。最重要的还是 1 和 2。
+        # 重点修正：员工应该能看到老板让 AI 发给员工的消息（target_role == 'employee'）。
+        query = query.filter(
+            or_(
+                models.Message.target_role == None, 
+                models.Message.target_role == role,
+                models.Message.sender_id == role
+            )
+        )
     messages = query.order_by(models.Message.timestamp.asc()).all()
     return {"messages": [{"id": m.id, "role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
 
