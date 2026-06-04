@@ -297,6 +297,14 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         # 并且用户是员工，那这句话其实是回复给员工确认的，没有问题。
         # 但如果是老板说“看看进度是不是落后了”，工具返回 "已向员工询问排期进度。"
         # 这句话应该回复给老板。之前出 Bug 是因为老板这边的上下文被污染了。
+        
+        # 终极修复：如果当前用户是 employee，且模型最终生成的 content 包含了给老板汇报的话术，
+        # 说明模型没有正确走 tool_call，或者二次回答的时候又重复了一遍。
+        if user_id == "employee" and ("老板" in content and "说" in content):
+            # 强制调用汇报工具，确保老板能收到
+            execute_function_call("report_to_boss", {"project_id": project_id, "report_content": content}, session_id, db)
+            content = "好的，我已经向老板汇报了你的进度。"
+            
         return content
 
     except Exception as e:

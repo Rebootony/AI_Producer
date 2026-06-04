@@ -44,6 +44,7 @@ export interface Project {
 export interface Session {
   id: string;
   timestamp: string;
+  unreadCount?: number;
 }
 
 interface AppState {

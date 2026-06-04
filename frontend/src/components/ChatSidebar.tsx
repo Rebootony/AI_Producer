@@ -13,10 +13,17 @@ export function ChatSidebar() {
   const fetchSessions = async () => {
     const projectId = currentProjectId || 'p1';
     try {
-      const res = await fetch(`/api/messages/${projectId}/sessions`);
+      const roleParam = currentUser ? `?role=${currentUser.role}` : '';
+      const res = await fetch(`/api/messages/${projectId}/sessions${roleParam}`);
       if (res.ok) {
         const data = await res.json();
-        setSessions(data.sessions || []);
+        const loadedSessions = data.sessions || [];
+        setSessions(loadedSessions);
+        
+        // 自动选中最近的一次对话 (如果当前没有选中任何特定的session)
+        if (loadedSessions.length > 0 && currentSessionId === 'default') {
+            setCurrentSessionId(loadedSessions[0].id);
+        }
       }
     } catch (e) {
       console.error('Failed to fetch sessions', e);
@@ -53,6 +60,15 @@ export function ChatSidebar() {
       fetchMessages();
     }
   }, [currentProjectId, currentUser, currentSessionId]);
+
+  // 当选中某个 session 时，如果该 session 有未读红点，本地清除它
+  useEffect(() => {
+    if (currentSessionId && sessions.length > 0) {
+       setSessions(sessions.map(s => 
+          s.id === currentSessionId ? { ...s, unreadCount: 0 } : s
+       ));
+    }
+  }, [currentSessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -197,12 +213,16 @@ export function ChatSidebar() {
                   key={s.id}
                   onClick={() => { setCurrentSessionId(s.id); setShowSessions(false); }}
                   className={cn(
-                    "w-full text-left px-4 py-3 text-sm border-b border-zinc-100 hover:bg-blue-50 transition-colors",
+                    "w-full text-left px-4 py-3 text-sm border-b border-zinc-100 hover:bg-blue-50 transition-colors relative",
                     s.id === currentSessionId ? "bg-blue-50/50 font-medium text-blue-600" : "text-zinc-700"
                   )}
                 >
-                  <div className="truncate">对话 {s.id.replace('session_', '')}</div>
+                  <div className="truncate pr-6">对话 {s.id.replace('session_', '')}</div>
                   <div className="text-xs text-zinc-400 mt-1">{new Date(s.timestamp).toLocaleString()}</div>
+                  {/* 小红点 */}
+                  {s.id !== currentSessionId && s.unreadCount && s.unreadCount > 0 ? (
+                    <div className="absolute top-1/2 -translate-y-1/2 right-4 w-2 h-2 bg-red-500 rounded-full"></div>
+                  ) : null}
                 </button>
               ))}
               {sessions.length === 0 && (
