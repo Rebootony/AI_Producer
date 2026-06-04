@@ -84,7 +84,7 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         db.commit()
         return f"已添加交付物: {args['asset_name']}"
     elif name == "transfer_message":
-        db.add(models.Message(project_id=args["project_id"], session_id=session_id, sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
+        db.add(models.Message(project_id=args["project_id"], session_id="default", sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
         db.commit()
         return f"已成功向 {args['target_role']} 传达消息。"
     elif name == "save_user_preference":
@@ -92,33 +92,33 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
     elif name == "ask_employee_schedule":
         details = args.get("details", "")
         content = f"【工作安排】目前的排期进度怎么样了？{details}"
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工询问排期进度。"
     elif name == "ask_employee_risk":
         content = "【进度跟进】目前项目有什么风险点或困难需要我这边协调解决的吗？"
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工询问项目风险。"
     elif name == "urge_employee_delivery":
         content = "【催促交付】请尽快完成并交付当前的产出物，加快进度。"
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工催促交付。"
     elif name == "provide_client_feedback":
         content = f"【客户反馈】客户的最新反馈来了，注意按照这个修改：{args.get('feedback')}"
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工转达客户反馈。"
     elif name == "schedule_internal_meeting":
         content = f"【会议安排】请注意一下接下来的会议或日程安排：{args.get('meeting_info')}"
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="employee"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="employee"))
         db.commit()
         return "已向员工通知会议安排。"
     elif name == "report_to_boss":
         content = args.get("report_content")
         # 主动发给老板
-        db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="boss"))
+        db.add(models.Message(project_id=project.id, session_id="default", sender_id="ai_producer", content=content, target_role="boss"))
         db.commit()
         return "已成功向老板汇报。"
     

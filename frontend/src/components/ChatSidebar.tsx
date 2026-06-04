@@ -7,28 +7,7 @@ export function ChatSidebar() {
   const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject, currentSessionId, setCurrentSessionId, sessions, setSessions } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showSessions, setShowSessions] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  const fetchSessions = async () => {
-    const projectId = currentProjectId || 'p1';
-    try {
-      const roleParam = currentUser ? `?role=${currentUser.role}` : '';
-      const res = await fetch(`/api/messages/${projectId}/sessions${roleParam}`);
-      if (res.ok) {
-        const data = await res.json();
-        const loadedSessions = data.sessions || [];
-        setSessions(loadedSessions);
-        
-        // 自动选中最近的一次对话 (如果当前没有选中任何特定的session)
-        if (loadedSessions.length > 0 && currentSessionId === 'default') {
-            setCurrentSessionId(loadedSessions[0].id);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to fetch sessions', e);
-    }
-  };
 
   const fetchMessages = async () => {
     const projectId = currentProjectId || 'p1';
@@ -54,11 +33,19 @@ export function ChatSidebar() {
     }
   };
 
+  // 轮询自动刷新消息
   useEffect(() => {
-    if (currentUser) {
-      fetchSessions();
+    if (!currentUser || !currentProjectId || !currentSessionId) return;
+    
+    // 初始化时获取一次
+    fetchMessages();
+
+    // 设置定时器每 3 秒刷新一次
+    const intervalId = setInterval(() => {
       fetchMessages();
-    }
+    }, 3000);
+
+    return () => clearInterval(intervalId);
   }, [currentProjectId, currentUser, currentSessionId]);
 
   // 当选中某个 session 时，如果该 session 有未读红点，本地清除它
@@ -108,9 +95,6 @@ export function ChatSidebar() {
            const pData = await projectRes.json();
            updateProject(currentProjectId || 'p1', { budget: pData.budget, status: pData.status === 'planning' ? 'planning' : 'in_progress' });
         }
-        
-        // Refresh sessions to ensure current session is listed
-        fetchSessions();
       }
     } catch (error) {
       addMessage({ role: 'ai', content: '（网络错误，无法连接后端模型服务）' });
@@ -119,42 +103,12 @@ export function ChatSidebar() {
     }
   };
 
-  const handleRelayToEmployee = async () => {
-    if (!currentUser || currentUser.role !== 'boss') return;
-    setLoading(true);
-    try {
-      await fetch('/api/relay', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          project_id: currentProjectId || 'p1',
-          target_role: 'employee',
-          content: '请在今天18:00前回复排期进度与下一步风险点。',
-          session_id: currentSessionId
-        })
-      });
-      fetchMessages();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createNewSession = () => {
-    const newId = `session_${Date.now()}`;
-    setCurrentSessionId(newId);
-    setShowSessions(false);
-  };
-
   const deleteCurrentSession = async () => {
     if (!confirm('确定要删除当前对话吗？')) return;
     const projectId = currentProjectId || 'p1';
     try {
-      await fetch(`/api/messages/${projectId}/${currentSessionId}`, { method: 'DELETE' });
+      await fetch(`/api/projects/${projectId}/threads/${currentSessionId}`, { method: 'DELETE' });
       setCurrentSessionId('default');
-      fetchSessions();
-      setShowSessions(false);
     } catch (e) {
       console.error(e);
     }
@@ -179,22 +133,6 @@ export function ChatSidebar() {
         <div className="flex space-x-2">
           <button
             type="button"
-            onClick={() => setShowSessions(!showSessions)}
-            className="p-2 text-zinc-400 hover:text-zinc-700 transition-colors rounded-md hover:bg-zinc-100"
-            title="历史对话"
-          >
-            <List size={18} />
-          </button>
-          <button
-            type="button"
-            onClick={createNewSession}
-            className="p-2 text-zinc-400 hover:text-zinc-700 transition-colors rounded-md hover:bg-zinc-100"
-            title="新建对话"
-          >
-            <Plus size={18} />
-          </button>
-          <button
-            type="button"
             onClick={deleteCurrentSession}
             className="p-2 text-red-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
             title="删除对话"
@@ -202,39 +140,10 @@ export function ChatSidebar() {
             <Trash2 size={18} />
           </button>
         </div>
-        
-        {/* Sessions Dropdown */}
-        {showSessions && (
-          <div className="absolute top-16 right-4 w-64 bg-white border border-zinc-200 shadow-lg rounded-xl z-50 overflow-hidden">
-            <div className="p-3 border-b border-zinc-100 bg-zinc-50 font-medium text-sm text-zinc-600">历史对话记录</div>
-            <div className="max-h-60 overflow-y-auto">
-              {sessions.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setCurrentSessionId(s.id); setShowSessions(false); }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 text-sm border-b border-zinc-100 hover:bg-blue-50 transition-colors relative",
-                    s.id === currentSessionId ? "bg-blue-50/50 font-medium text-blue-600" : "text-zinc-700"
-                  )}
-                >
-                  <div className="truncate pr-6">对话 {s.id.replace('session_', '')}</div>
-                  <div className="text-xs text-zinc-400 mt-1">{new Date(s.timestamp).toLocaleString()}</div>
-                  {/* 小红点 */}
-                  {s.id !== currentSessionId && s.unreadCount && s.unreadCount > 0 ? (
-                    <div className="absolute top-1/2 -translate-y-1/2 right-4 w-2 h-2 bg-red-500 rounded-full"></div>
-                  ) : null}
-                </button>
-              ))}
-              {sessions.length === 0 && (
-                <div className="p-4 text-center text-sm text-zinc-500">暂无历史对话</div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -267,6 +176,17 @@ export function ChatSidebar() {
             </div>
           </div>
         ))}
+        {loading && (
+          <div className="flex space-x-3 max-w-[85%]">
+            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shrink-0">
+              <Bot size={16} />
+            </div>
+            <div className="p-4 rounded-2xl bg-white text-zinc-800 border border-zinc-100 rounded-tl-sm shadow-sm flex items-center space-x-2">
+              <Loader2 size={16} className="animate-spin text-blue-600" />
+              <span className="text-sm text-zinc-500">AI 正在思考...</span>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 

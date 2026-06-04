@@ -94,31 +94,57 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         return {"id": project.id, "name": project.name, "status": project.status, "budget": project.budget}
     raise HTTPException(status_code=404, detail="Project not found")
 
-@app.get("/api/messages/{project_id}/sessions")
-def get_sessions(project_id: str, role: Optional[str] = None, db: Session = Depends(get_db)):
-    # 获取所有的消息
-    messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
-    sessions = {}
-    for m in messages:
-        if m.session_id not in sessions:
-            sessions[m.session_id] = {"id": m.session_id, "timestamp": m.timestamp, "unreadCount": 0}
-        else:
-            if m.timestamp > sessions[m.session_id]["timestamp"]:
-                sessions[m.session_id]["timestamp"] = m.timestamp
-        
-        # 计算未读消息（为了简化，如果一条消息 target_role 是当前用户，且发件人是 ai_producer，算作1条红点）
-        # 实际生产中需要一个 read_status 字段，这里我们使用简单的启发式：
-        # 计算这个 session 中发给当前 role 的所有 AI 消息数量。如果前端切进去看过了，前端应该把这个 count 清零。
-        # 这里为了满足要求，简单地记录该 session 里有多少条针对该 role 的 AI 消息。
-        if role and m.target_role == role and m.sender_id == "ai_producer":
-             sessions[m.session_id]["unreadCount"] += 1
-    
-    sorted_sessions = sorted(sessions.values(), key=lambda x: x["timestamp"], reverse=True)
-    return {"sessions": sorted_sessions}
+class ThreadRequest(BaseModel):
+    name: str
 
-@app.delete("/api/messages/{project_id}/{session_id}")
-def delete_session(project_id: str, session_id: str, db: Session = Depends(get_db)):
-    db.query(models.Message).filter(models.Message.project_id == project_id, models.Message.session_id == session_id).delete()
+@app.post("/api/projects/{project_id}/threads")
+def create_thread(project_id: str, req: ThreadRequest, user_id: str, db: Session = Depends(get_db)):
+    import time
+    thread_id = f"thread_{int(time.time()*1000)}"
+    new_thread = models.ChatThread(id=thread_id, project_id=project_id, user_id=user_id, name=req.name)
+    db.add(new_thread)
+    db.commit()
+    return {"id": new_thread.id, "name": new_thread.name}
+
+@app.get("/api/projects/{project_id}/threads")
+def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depends(get_db)):
+    # 为了简化，我们依然复用原来基于 messages 表推导 session 的逻辑，但也结合 ChatThread 表
+    # 如果要完全重构，就直接从 ChatThread 表里查。
+    # 这里我们返回所有的 thread 列表，并附加 unreadCount。
+    threads_db = db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id).all()
+    threads_dict = {t.id: {"id": t.id, "name": t.name, "timestamp": t.updated_at, "unreadCount": 0} for t in threads_db}
+    
+    # 默认存在一个 "default" session，为了兼容之前的逻辑
+    if "default" not in threads_dict:
+        threads_dict["default"] = {"id": "default", "name": "常规事务", "timestamp": models.get_utc_8(), "unreadCount": 0}
+
+    messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
+    for m in messages:
+        if m.session_id not in threads_dict:
+            # 如果是历史遗留的 session_id 没有在 thread 表里
+            threads_dict[m.session_id] = {"id": m.session_id, "name": f"对话 {m.session_id.replace('session_', '')}", "timestamp": m.timestamp, "unreadCount": 0}
+        else:
+            if m.timestamp > threads_dict[m.session_id]["timestamp"]:
+                threads_dict[m.session_id]["timestamp"] = m.timestamp
+        
+        if role and m.target_role == role and m.sender_id == "ai_producer":
+             threads_dict[m.session_id]["unreadCount"] += 1
+    
+    sorted_threads = sorted(threads_dict.values(), key=lambda x: x["timestamp"], reverse=True)
+    return {"threads": sorted_threads}
+
+@app.put("/api/projects/{project_id}/threads/{thread_id}")
+def update_thread(project_id: str, thread_id: str, req: ThreadRequest, db: Session = Depends(get_db)):
+    thread = db.query(models.ChatThread).filter(models.ChatThread.id == thread_id, models.ChatThread.project_id == project_id).first()
+    if thread:
+        thread.name = req.name
+        db.commit()
+    return {"status": "ok"}
+
+@app.delete("/api/projects/{project_id}/threads/{thread_id}")
+def delete_thread(project_id: str, thread_id: str, db: Session = Depends(get_db)):
+    db.query(models.Message).filter(models.Message.project_id == project_id, models.Message.session_id == thread_id).delete()
+    db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id, models.ChatThread.id == thread_id).delete()
     db.commit()
     return {"status": "ok"}
 
