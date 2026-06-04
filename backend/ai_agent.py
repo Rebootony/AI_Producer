@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import models
 
+from prompt_manager import get_full_system_prompt, add_user_preference
+from logger import log_interaction
+
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
 BASE_URL = os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
@@ -18,30 +21,6 @@ if not API_KEY and "localhost" in BASE_URL:
 
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-SYSTEM_PROMPT = """你是一个专业的“AI制片人”。你现在在一个广告制片管理系统中工作。
-当前 Demo 只有两个真实角色：老板（boss）与员工（employee）。其它角色为占位符，不参与真实流程。
-每次对话系统会自动传入当前聊天的项目ID (project_id)，请直接使用系统传入的 project_id。
-当老板要求你“询问员工/催促/转达”时，请主动调用 transfer_message 向员工发起会话；当员工给出回复时，请将核心信息回传给老板。
-
-【回答风格要求（极其重要）】：
-1. 你的回复必须极度简练、口语化、接地气，就像微信日常聊天。
-2. 绝对不要使用 Markdown 列表、排版或长篇大论。能一两句话说明白就绝不多说。
-3. 语气要自然。比如当老板问“进度怎么样？”，只需回答类似：“老板，目前项目在拍摄阶段，预算是30万，一切正常。” 不要分析，不要列举要点。
-4. 拒绝 AI 机器人的机械腔调。
-
-你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
-1. get_project_overview: 获取客户信息、核心目标、整体制作周期与总预算
-2. get_budget_breakdown: 获取前期、拍摄、后期的具体费用拆解
-3. modify_budget: 修改项目总预算或细项超支
-4. get_project_timeline: 获取项目当前阶段、排期与交付时间
-5. update_project_stage: 推进或更新项目状态
-6. get_crew_info: 获取当前分配的主创人员名单及天数
-7. update_crew_assignment: 调整或新增人员班底
-8. get_assets_list: 获取已归档的项目资产列表
-9. add_project_asset: 记录新的交付物
-10. transfer_message: 向不在场的角色传话或派发任务
-"""
-
 tools = [
     {"type": "function", "function": {"name": "get_project_overview", "description": "获取客户信息、核心目标、制作周期与总预算", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "get_budget_breakdown", "description": "获取前期、拍摄、后期等具体费用拆解", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
@@ -52,7 +31,8 @@ tools = [
     {"type": "function", "function": {"name": "update_crew_assignment", "description": "更新人员安排，如换人或增加工作天数", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "role", "name", "days"]}}},
     {"type": "function", "function": {"name": "get_assets_list", "description": "获取已经产出并归档的项目交付物/资产列表", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "add_project_asset", "description": "记录新的资产文件上传或确认交付物已完成", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "asset_name": {"type": "string"}, "asset_type": {"type": "string"}}, "required": ["project_id", "asset_name", "asset_type"]}}},
-    {"type": "function", "function": {"name": "transfer_message", "description": "向指定的其他角色传话", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_role": {"type": "string"}, "content": {"type": "string"}}, "required": ["project_id", "target_role", "content"]}}}
+    {"type": "function", "function": {"name": "transfer_message", "description": "向指定的其他角色传话", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_role": {"type": "string"}, "content": {"type": "string"}}, "required": ["project_id", "target_role", "content"]}}},
+    {"type": "function", "function": {"name": "save_user_preference", "description": "当用户提出长期的习惯、要求、回答格式等长期指令时调用此工具保存。例如'以后都叫我老板'、'以后回答要简短'。", "parameters": {"type": "object", "properties": {"preference": {"type": "string", "description": "需要长期保存的用户偏好指令"}}, "required": ["preference"]}}}
 ]
 
 def execute_function_call(name: str, args: dict, db: Session):
@@ -101,6 +81,8 @@ def execute_function_call(name: str, args: dict, db: Session):
         db.add(models.Message(project_id=args["project_id"], sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
         db.commit()
         return f"已成功向 {args['target_role']} 传达消息。"
+    elif name == "save_user_preference":
+        return add_user_preference(args["preference"])
     
     return "未知函数"
 
@@ -119,6 +101,12 @@ def parse_budget_target(message: str) -> Optional[float]:
     return None
 
 def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session) -> str:
+    if any(key in user_message for key in ["叫我", "以后", "记住", "偏好", "规则"]):
+        content = add_user_preference(user_message)
+        content = f"好的，{content}"
+        log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
+        return content
+
     if not SUPPORTS_FUNCTIONS:
         if any(key in user_message for key in ["单位", "什么单位"]):
             project = db.query(models.Project).filter(models.Project.id == project_id).first()
@@ -152,7 +140,10 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
     history = db.query(models.Message).filter(models.Message.project_id == project_id).order_by(models.Message.timestamp.desc()).limit(10).all()
     history = list(reversed(history))
     
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + f"\n\n当前正在沟通的项目ID为: {project_id}"}]
+    # 获取包含用户偏好的完整 Prompt
+    system_prompt = get_full_system_prompt()
+    
+    messages = [{"role": "system", "content": system_prompt + f"\n\n当前正在沟通的项目ID为: {project_id}"}]
     for msg in history:
         # 排除刚才用户刚发的那条（防止重复，假设外部已经存了），这里我们依赖外部先存用户消息，所以直接用
         role = "assistant" if msg.sender_id == "ai_producer" else "user"
@@ -180,6 +171,9 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
         response_message = response.choices[0].message
         tool_calls = response_message.tool_calls if SUPPORTS_FUNCTIONS else None
         
+        # 记录执行的工具
+        tools_used = []
+        
         # 如果大模型决定调用工具
         if tool_calls:
             # 这里简化处理，只执行第一个 tool_call，然后把结果告诉大模型让它总结
@@ -187,8 +181,16 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
             
+            tools_used.append(function_name)
+            
             function_response = execute_function_call(function_name, function_args, db)
             
+            # 如果是特殊的无需总结的指令，或者直接返回
+            if function_name == "save_user_preference":
+                content = f"好的，{function_response}"
+                log_interaction(project_id, user_id, user_message, content, tools_used)
+                return content
+
             messages.append(response_message)
             messages.append({
                 "tool_call_id": tool_call.id,
@@ -203,15 +205,27 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
             )
             content = second_response.choices[0].message.content
             if content and len(content) > 1000:
-                return content[:1000] + "…"
+                content = content[:1000] + "…"
+            if not content:
+                content = "好的，已执行操作。"
+            
+            # 日志记录
+            log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
         if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]):
-            return execute_function_call("get_project_overview", {"project_id": project_id}, db)
+            content = execute_function_call("get_project_overview", {"project_id": project_id}, db)
+            log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
+            return content
 
         content = response_message.content
         if content and len(content) > 1000:
-            return content[:1000] + "…"
+            content = content[:1000] + "…"
+        if not content and not tool_calls:
+            content = "我不太明白您的意思，您可以换个说法吗？"
+            
+        # 日志记录
+        log_interaction(project_id, user_id, user_message, content, tools_used)
         return content
 
     except Exception as e:

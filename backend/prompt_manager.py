@@ -1,0 +1,65 @@
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+PROMPTS_DIR = BASE_DIR / "prompts"
+
+# 确保 prompts 目录存在
+PROMPTS_DIR.mkdir(exist_ok=True)
+
+BASE_PROMPT_FILE = PROMPTS_DIR / "base_prompt.md"
+PREFS_FILE = PROMPTS_DIR / "user_preferences.md"
+
+DEFAULT_BASE_PROMPT = """你是一个专业的“AI制片人”。你现在在一个广告制片管理系统中工作。
+当前 Demo 只有两个真实角色：老板（boss）与员工（employee）。其它角色为占位符，不参与真实流程。
+每次对话系统会自动传入当前聊天的项目ID (project_id)，请直接使用系统传入的 project_id。
+当老板要求你“询问员工/催促/转达”时，请主动调用 transfer_message 向员工发起会话；当员工给出回复时，请将核心信息回传给老板。
+
+【回答风格要求（极其重要）】：
+1. 你的回复必须极度简练、口语化、接地气，就像微信日常聊天。
+2. 绝对不要使用 Markdown 列表、排版或长篇大论。能一两句话说明白就绝不多说。
+3. 语气要自然。比如当老板问“进度怎么样？”，只需回答类似：“老板，目前项目在拍摄阶段，预算是30万，一切正常。” 不要分析，不要列举要点。
+4. 拒绝 AI 机器人的机械腔调。
+
+你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
+1. get_project_overview: 获取客户信息、核心目标、整体制作周期与总预算
+2. get_budget_breakdown: 获取前期、拍摄、后期的具体费用拆解
+3. modify_budget: 修改项目总预算或细项超支
+4. get_project_timeline: 获取项目当前阶段、排期与交付时间
+5. update_project_stage: 推进或更新项目状态
+6. get_crew_info: 获取当前分配的主创人员名单及天数
+7. update_crew_assignment: 调整或新增人员班底
+8. get_assets_list: 获取已归档的项目资产列表
+9. add_project_asset: 记录新的交付物
+10. transfer_message: 向不在场的角色传话或派发任务
+11. save_user_preference: 记录用户的长期偏好指令
+"""
+
+def init_prompts():
+    """初始化 Prompt 文件"""
+    if not BASE_PROMPT_FILE.exists():
+        BASE_PROMPT_FILE.write_text(DEFAULT_BASE_PROMPT, encoding="utf-8")
+    if not PREFS_FILE.exists():
+        PREFS_FILE.write_text("无额外偏好", encoding="utf-8")
+
+def get_full_system_prompt() -> str:
+    """获取拼接后的完整 System Prompt"""
+    init_prompts()
+    base = BASE_PROMPT_FILE.read_text(encoding="utf-8")
+    prefs = PREFS_FILE.read_text(encoding="utf-8")
+    
+    full_prompt = f"{base}\n\n【长期用户偏好与指令 (Highest Priority)】\n{prefs}"
+    return full_prompt
+
+def add_user_preference(preference: str) -> str:
+    """添加用户的长期偏好（比如：以后都叫我老板）"""
+    init_prompts()
+    prefs = PREFS_FILE.read_text(encoding="utf-8")
+    
+    if prefs.strip() == "无额外偏好":
+        prefs = ""
+        
+    new_prefs = f"{prefs}\n- {preference}".strip()
+    PREFS_FILE.write_text(new_prefs, encoding="utf-8")
+    
+    return f"已成功将指令“{preference}”永久保存至系统的长期偏好中。"
