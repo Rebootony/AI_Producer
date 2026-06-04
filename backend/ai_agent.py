@@ -1,133 +1,153 @@
 import json
 import os
+from pathlib import Path
 from openai import OpenAI
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import models
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
 BASE_URL = os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
 API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
-MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B") #免费
+MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B")
+SUPPORTS_FUNCTIONS = os.getenv("LLM_SUPPORTS_FUNCTIONS", "false").lower() == "true"
 
-if not API_KEY:
+if not API_KEY and "localhost" in BASE_URL:
     API_KEY = "ollama"
 
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 SYSTEM_PROMPT = """你是一个专业的“AI制片人”。你现在在一个广告制片管理系统中工作。
 当前 Demo 只有两个真实角色：老板（boss）与员工（employee）。其它角色为占位符，不参与真实流程。
-你可以和老板沟通，也可以和员工沟通。每次对话系统会自动传入当前聊天的项目ID (project_id)，如果用户让你“增加预算”或“推进进度”，请直接使用系统传入的 project_id，不要再向用户询问项目编号。
+每次对话系统会自动传入当前聊天的项目ID (project_id)，请直接使用系统传入的 project_id。
 当老板要求你“询问员工/催促/转达”时，请主动调用 transfer_message 向员工发起会话；当员工给出回复时，请将核心信息回传给老板。
-你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
-1. modify_budget: 修改项目的预算
-2. update_project_stage: 推进项目的执行阶段
-3. transfer_message: 向不在场的其他角色传话或派发任务
-4. get_project_status: 获取当前项目预算与阶段信息
 
-你的回复应当专业、简洁、像真实的制片人。当需要修改预算或推进进度，或向他人传话时，请调用相应的工具。
+【回答风格要求（极其重要）】：
+1. 你的回复必须极度简练、口语化、接地气，就像微信日常聊天。
+2. 绝对不要使用 Markdown 列表、排版或长篇大论。能一两句话说明白就绝不多说。
+3. 语气要自然。比如当老板问“进度怎么样？”，只需回答类似：“老板，目前项目在拍摄阶段，预算是30万，一切正常。” 不要分析，不要列举要点。
+4. 拒绝 AI 机器人的机械腔调。
+
+你有能力通过调用工具（Function Calling）来实际操作系统的后端数据：
+1. get_project_overview: 获取客户信息、核心目标、整体制作周期与总预算
+2. get_budget_breakdown: 获取前期、拍摄、后期的具体费用拆解
+3. modify_budget: 修改项目总预算或细项超支
+4. get_project_timeline: 获取项目当前阶段、排期与交付时间
+5. update_project_stage: 推进或更新项目状态
+6. get_crew_info: 获取当前分配的主创人员名单及天数
+7. update_crew_assignment: 调整或新增人员班底
+8. get_assets_list: 获取已归档的项目资产列表
+9. add_project_asset: 记录新的交付物
+10. transfer_message: 向不在场的角色传话或派发任务
 """
 
 tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "modify_budget",
-            "description": "修改项目的预算。当老板同意增加预算或员工报销超支时调用。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_id": {"type": "string"},
-                    "amount": {"type": "number", "description": "增加或减少的金额，正数为增加，负数为减少"},
-                    "reason": {"type": "string", "description": "修改预算的原因"}
-                },
-                "required": ["project_id", "amount", "reason"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_project_stage",
-            "description": "推进或更新项目的执行阶段（planning, shooting, post_production）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_id": {"type": "string"},
-                    "new_stage": {"type": "string", "enum": ["planning", "shooting", "post_production"]}
-                },
-                "required": ["project_id", "new_stage"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "transfer_message",
-            "description": "向指定的其他角色传话或派发任务（例如老板让你告诉导演明天开会）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_id": {"type": "string"},
-                    "target_role": {"type": "string", "description": "目标角色的ID，如 'employee' 或 'boss'"},
-                    "content": {"type": "string", "description": "要传达的具体内容"}
-                },
-                "required": ["project_id", "target_role", "content"]
-            }
-        }
-    }
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "get_project_status",
-            "description": "获取项目当前预算与阶段信息",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_id": {"type": "string"}
-                },
-                "required": ["project_id"]
-            }
-        }
-    }
+    {"type": "function", "function": {"name": "get_project_overview", "description": "获取客户信息、核心目标、制作周期与总预算", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "get_budget_breakdown", "description": "获取前期、拍摄、后期等具体费用拆解", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "modify_budget", "description": "修改项目的总预算，或者记录特定细项的超支增加", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "amount": {"type": "number", "description": "增减金额"}, "reason": {"type": "string"}}, "required": ["project_id", "amount", "reason"]}}},
+    {"type": "function", "function": {"name": "get_project_timeline", "description": "获取项目排期、当前阶段及预计交付时间", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "update_project_stage", "description": "更新项目的执行阶段（planning, shooting, post_production）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "new_stage": {"type": "string"}}, "required": ["project_id", "new_stage"]}}},
+    {"type": "function", "function": {"name": "get_crew_info", "description": "获取当前项目分配的主创人员名单（导演、制片等）及工作天数", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "update_crew_assignment", "description": "更新人员安排，如换人或增加工作天数", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "role", "name", "days"]}}},
+    {"type": "function", "function": {"name": "get_assets_list", "description": "获取已经产出并归档的项目交付物/资产列表", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "add_project_asset", "description": "记录新的资产文件上传或确认交付物已完成", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "asset_name": {"type": "string"}, "asset_type": {"type": "string"}}, "required": ["project_id", "asset_name", "asset_type"]}}},
+    {"type": "function", "function": {"name": "transfer_message", "description": "向指定的其他角色传话", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_role": {"type": "string"}, "content": {"type": "string"}}, "required": ["project_id", "target_role", "content"]}}}
 ]
 
 def execute_function_call(name: str, args: dict, db: Session):
-    if name == "modify_budget":
-        project = db.query(models.Project).filter(models.Project.id == args["project_id"]).first()
-        if project:
-            project.budget += args["amount"]
-            db.commit()
-            return f"预算已修改，增加了 {args['amount']}，目前总预算为 {project.budget}。原因：{args['reason']}"
+    project = db.query(models.Project).filter(models.Project.id == args.get("project_id")).first()
+    if not project and name != "transfer_message":
         return "找不到该项目"
+
+    if name == "get_project_overview":
+        return f"客户: {project.client}, 行业: {project.industry}, 目标: {project.goal}, 交付: {project.delivery_date}, 总预算: {project.budget}"
+    elif name == "get_budget_breakdown":
+        items = db.query(models.BudgetBreakdown).filter(models.BudgetBreakdown.project_id == project.id).all()
+        res = ", ".join([f"{i.category}-{i.item_name}: {i.amount}" for i in items])
+        return f"预算明细: {res if res else '无'}"
+    elif name == "modify_budget":
+        project.budget += args["amount"]
+        db.commit()
+        return f"预算已修改，调整 {args['amount']}，总预算变为 {project.budget}。原因：{args['reason']}"
+    elif name == "get_project_timeline":
+        return f"当前阶段: {project.status}, 交付时间: {project.delivery_date}"
     elif name == "update_project_stage":
-        project = db.query(models.Project).filter(models.Project.id == args["project_id"]).first()
-        if project:
-            project.status = args["new_stage"]
-            db.commit()
-            return f"项目阶段已更新为：{args['new_stage']}"
-        return "找不到该项目"
+        project.status = args["new_stage"]
+        db.commit()
+        return f"阶段已更新为：{args['new_stage']}"
+    elif name == "get_crew_info":
+        crews = db.query(models.Crew).filter(models.Crew.project_id == project.id).all()
+        res = ", ".join([f"{c.role}({c.name}) {c.days}天" for c in crews])
+        return f"当前人员: {res if res else '无'}"
+    elif name == "update_crew_assignment":
+        crew = db.query(models.Crew).filter(models.Crew.project_id == project.id, models.Crew.role == args["role"]).first()
+        if crew:
+            crew.name = args["name"]
+            crew.days = args["days"]
+        else:
+            db.add(models.Crew(project_id=project.id, role=args["role"], name=args["name"], days=args["days"]))
+        db.commit()
+        return f"人员已更新: {args['role']}为{args['name']}，工作{args['days']}天"
+    elif name == "get_assets_list":
+        assets = db.query(models.Asset).filter(models.Asset.project_id == project.id).all()
+        res = ", ".join([f"{a.name}({a.asset_type})" for a in assets])
+        return f"资产列表: {res if res else '暂无资产'}"
+    elif name == "add_project_asset":
+        db.add(models.Asset(project_id=project.id, name=args["asset_name"], asset_type=args["asset_type"]))
+        db.commit()
+        return f"已添加交付物: {args['asset_name']}"
     elif name == "transfer_message":
-        ai_msg = models.Message(
-            project_id=args["project_id"],
-            sender_id="ai_producer",
-            content=f"【传达给 {args['target_role']}】：{args['content']}",
-            target_role=args["target_role"]
-        )
-        db.add(ai_msg)
+        db.add(models.Message(project_id=args["project_id"], sender_id="ai_producer", content=f"【传达给 {args['target_role']}】：{args['content']}", target_role=args["target_role"]))
         db.commit()
         return f"已成功向 {args['target_role']} 传达消息。"
-    elif name == "get_project_status":
-        project = db.query(models.Project).filter(models.Project.id == args["project_id"]).first()
-        if project:
-            return f"项目 {project.id} 当前预算为 {project.budget}，阶段为 {project.status}。"
-        return "找不到该项目"
     
     return "未知函数"
 
+from typing import Optional
+
+def parse_budget_target(message: str) -> Optional[float]:
+    text = message.replace(",", "").replace("，", "")
+    if "万" in text:
+        digits = "".join([c for c in text if c.isdigit()])
+        if digits:
+            return float(digits) * 10000
+        return None
+    digits = "".join([c for c in text if c.isdigit()])
+    if digits:
+        return float(digits)
+    return None
+
 def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session) -> str:
+    if not SUPPORTS_FUNCTIONS:
+        if any(key in user_message for key in ["单位", "什么单位"]):
+            project = db.query(models.Project).filter(models.Project.id == project_id).first()
+            if project:
+                return f"预算单位为人民币元，当前预算为 {project.budget} 元（约 {project.budget / 10000:.1f} 万）。"
+            return "找不到该项目"
+
+        if "预算" in user_message and any(key in user_message for key in ["改为", "修改", "调整", "改成", "变更"]):
+            target = parse_budget_target(user_message)
+            project = db.query(models.Project).filter(models.Project.id == project_id).first()
+            if project and target is not None:
+                delta = target - project.budget
+                return execute_function_call("modify_budget", {"project_id": project_id, "amount": delta, "reason": "手动调整预算"}, db)
+            return "找不到该项目"
+
+        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]):
+            return execute_function_call("get_project_overview", {"project_id": project_id}, db)
+
+        if any(key in user_message for key in ["推进", "阶段", "进度", "排期"]):
+            return execute_function_call("get_project_timeline", {"project_id": project_id}, db)
+
+        if any(key in user_message for key in ["传达", "转达", "告诉", "催促", "问一下", "联系"]):
+            target_role = "employee" if user_id == "boss" else "boss"
+            return execute_function_call(
+                "transfer_message",
+                {"project_id": project_id, "target_role": target_role, "content": user_message},
+                db
+            )
+
     # 1. 获取历史记录（最近10条）
     history = db.query(models.Message).filter(models.Message.project_id == project_id).order_by(models.Message.timestamp.desc()).limit(10).all()
     history = list(reversed(history))
@@ -140,15 +160,25 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
         messages.append({"role": role, "content": prefix + msg.content})
         
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto"
-        )
+        if SUPPORTS_FUNCTIONS:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=512,
+                temperature=0.2
+            )
+        else:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                max_tokens=512,
+                temperature=0.2
+            )
         
         response_message = response.choices[0].message
-        tool_calls = response_message.tool_calls
+        tool_calls = response_message.tool_calls if SUPPORTS_FUNCTIONS else None
         
         # 如果大模型决定调用工具
         if tool_calls:
@@ -171,9 +201,31 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
                 model=MODEL_NAME,
                 messages=messages,
             )
-            return second_response.choices[0].message.content
+            content = second_response.choices[0].message.content
+            if content and len(content) > 1000:
+                return content[:1000] + "…"
+            return content
 
-        return response_message.content
+        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费", "排期", "阶段", "进度"]):
+            return execute_function_call("get_project_overview", {"project_id": project_id}, db)
+
+        content = response_message.content
+        if content and len(content) > 1000:
+            return content[:1000] + "…"
+        return content
 
     except Exception as e:
-        return f"【AI系统提示】请求大模型出错。可能是 API_KEY 未设置或余额不足。错误信息: {str(e)}"
+        error_text = str(e)
+        if "401" in error_text or "Invalid token" in error_text:
+            return "【AI系统提示】API_KEY 无效或未设置，请检查硅基流动密钥。"
+        return f"【AI系统提示】请求大模型出错。可能是 API_KEY 未设置或余额不足。错误信息: {error_text}"
+
+def get_config_snapshot():
+    key = API_KEY
+    masked = "" if not key else f"{key[:4]}***{key[-4:]}"
+    return {
+        "base_url": BASE_URL,
+        "model": MODEL_NAME,
+        "supports_functions": SUPPORTS_FUNCTIONS,
+        "api_key_masked": masked
+    }

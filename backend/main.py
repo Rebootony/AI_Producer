@@ -5,7 +5,7 @@ import uvicorn
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
-from database import engine, Base, get_db
+from database import engine, get_db
 import models
 
 # 创建数据库表
@@ -29,9 +29,39 @@ def init_db(db: Session):
         employee = models.User(id="employee", role="employee", name="执行团队/张导")
         ai = models.User(id="ai_producer", role="ai", name="AI 制片人")
         db.add_all([boss, employee, ai])
-        
-        project = models.Project(id="demo_project", name="达梦宣传片", status="planning", budget=300000)
+
+    project = db.query(models.Project).filter(models.Project.id == "p1").first()
+    if not project:
+        project = models.Project(
+            id="p1", name="达梦宣传片", status="planning", budget=300000.0,
+            client="武汉达梦数据库股份有限公司", industry="IT-基础软件",
+            goal="品牌升级与营销传播", delivery_date="2026-04-15"
+        )
         db.add(project)
+        db.commit() # Commit to get project ID
+        
+        # Add Budget Breakdown
+        db.add_all([
+            models.BudgetBreakdown(project_id="p1", category="前期筹备", item_name="创意方案", amount=3000),
+            models.BudgetBreakdown(project_id="p1", category="前期筹备", item_name="执行脚本", amount=3000),
+            models.BudgetBreakdown(project_id="p1", category="拍摄执行", item_name="导演", amount=9000),
+            models.BudgetBreakdown(project_id="p1", category="拍摄执行", item_name="制片", amount=4500),
+            models.BudgetBreakdown(project_id="p1", category="拍摄执行", item_name="摄影", amount=7500),
+        ])
+        
+        # Add Crew
+        db.add_all([
+            models.Crew(project_id="p1", role="导演", name="张导", days=3),
+            models.Crew(project_id="p1", role="制片", name="李制片", days=3),
+            models.Crew(project_id="p1", role="摄影指导", name="王摄影", days=3),
+        ])
+        
+        # Add Asset
+        db.add_all([
+            models.Asset(project_id="p1", name="达梦英文宣传片需求Brief", asset_type="PDF"),
+            models.Asset(project_id="p1", name="达梦英文宣传片报价", asset_type="Excel"),
+        ])
+        
         db.commit()
 
 # 在启动时初始化数据
@@ -44,7 +74,7 @@ class ChatRequest(BaseModel):
     message: str
     user_id: str
     role: str # 'boss' 或 'employee'
-    project_id: str = "demo_project"
+    project_id: str = "p1"
 
 class RelayRequest(BaseModel):
     project_id: str
@@ -70,7 +100,7 @@ def get_messages(project_id: str, role: Optional[str] = None, db: Session = Depe
     messages = query.order_by(models.Message.timestamp.asc()).all()
     return {"messages": [{"role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
 
-from ai_agent import chat_with_llm
+from ai_agent import chat_with_llm, get_config_snapshot
 
 @app.post("/api/chat")
 def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
@@ -101,6 +131,10 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
         db.commit()
     
     return {"reply": reply}
+
+@app.get("/api/health")
+def health():
+    return get_config_snapshot()
 
 @app.post("/api/relay")
 def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):

@@ -10,7 +10,7 @@ export function ChatSidebar() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const fetchMessages = async () => {
-    const projectId = currentProjectId || 'demo_project';
+    const projectId = currentProjectId || 'p1';
     try {
       const roleParam = currentUser ? `?role=${currentUser.role}` : '';
       const res = await fetch(`/api/messages/${projectId}${roleParam}`);
@@ -62,7 +62,7 @@ export function ChatSidebar() {
           message: userText,
           user_id: currentUser.id,
           role: currentUser.role,
-          project_id: currentProjectId || 'demo_project'
+          project_id: currentProjectId || 'p1'
         })
       });
 
@@ -71,7 +71,7 @@ export function ChatSidebar() {
         addMessage({ role: 'ai', content: data.reply });
         
         // Fetch project to see if budget/stage changed
-        const projectRes = await fetch(`/api/projects/${currentProjectId || 'demo_project'}`);
+        const projectRes = await fetch(`/api/projects/${currentProjectId || 'p1'}`);
         if (projectRes.ok) {
            const pData = await projectRes.json();
            updateProject(currentProjectId || 'p1', { budget: pData.budget, status: pData.status === 'planning' ? 'planning' : 'in_progress' });
@@ -94,7 +94,7 @@ export function ChatSidebar() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          project_id: currentProjectId || 'demo_project',
+          project_id: currentProjectId || 'p1',
           target_role: 'employee',
           content: '请在今天18:00前回复排期进度与下一步风险点。'
         })
