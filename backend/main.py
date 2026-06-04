@@ -154,7 +154,12 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     # 调用大模型并执行 Function Calling
     reply = chat_with_llm(req.message, req.user_id, req.project_id, req.session_id, db)
     
-    # 存入 AI 回复
+    # 检查 AI 的回复中是否包含 "【AI转达】" 或者是否调用了 report_to_boss 等需要将消息发给特定角色的功能
+    # 为了简化，如果 reply 是我们刚刚在 report_to_boss 工具里生成的那个提示，说明它主要是生成给 boss 的
+    # 这里我们在 ai_agent.py 中处理了工具调用。
+    # 实际上，如果工具已经被调用，工具内部会生成针对目标角色 (boss/employee) 的 message。
+    # LLM 返回的 summary (reply) 应该是返回给当前请求者 (req.role) 的确认信息。
+    
     ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
     db.add(ai_msg)
     db.commit()

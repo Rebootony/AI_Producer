@@ -117,6 +117,7 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         return "已向员工通知会议安排。"
     elif name == "report_to_boss":
         content = args.get("report_content")
+        # 主动发给老板
         db.add(models.Message(project_id=project.id, session_id=session_id, sender_id="ai_producer", content=content, target_role="boss"))
         db.commit()
         return "已成功向老板汇报。"
@@ -140,9 +141,8 @@ def parse_budget_target(message: str) -> Optional[float]:
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
     # 严格判断是否是添加规则指令
     is_rule = False
-    if any(key in user_message for key in ["叫我", "以后", "记住", "偏好", "规则"]):
-        if not any(k in user_message for k in ["告诉", "传达", "催", "问", "跟进"]):
-            is_rule = True
+    if "以后都叫我" in user_message or "以后请叫我" in user_message or "请记住" in user_message:
+        is_rule = True
             
     if is_rule:
         content = add_user_preference(user_message)
@@ -173,6 +173,8 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
 
         if any(key in user_message for key in ["传达", "转达", "告诉", "催", "问一下", "联系"]):
             target_role = "employee" if user_id == "boss" else "boss"
+            if "催" in user_message:
+                return execute_function_call("urge_employee_delivery", {"project_id": project_id}, session_id, db)
             return execute_function_call(
                 "transfer_message",
                 {"project_id": project_id, "target_role": target_role, "content": user_message},
@@ -190,7 +192,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
     # 获取包含用户偏好的完整 Prompt
     system_prompt = get_full_system_prompt()
     
-    messages = [{"role": "system", "content": system_prompt + f"\n\n当前正在沟通的项目ID为: {project_id}"}]
+    messages = [{"role": "system", "content": system_prompt + f"\n\n当前正在沟通的项目ID为: {project_id}\n你现在正在和【{user_id}】对话。"}]
     for msg in history:
         # 排除刚才用户刚发的那条（防止重复，假设外部已经存了），这里我们依赖外部先存用户消息，所以直接用
         role = "assistant" if msg.sender_id == "ai_producer" else "user"
@@ -199,10 +201,15 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         
     try:
         if SUPPORTS_FUNCTIONS:
+            # 对于员工，我们强制它只能用 report_to_boss
+            tools_to_use = tools
+            if user_id == "employee":
+                tools_to_use = [t for t in tools if t["function"]["name"] == "report_to_boss"]
+                
             response = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=messages,
-                tools=tools,
+                tools=tools_to_use,
                 tool_choice="auto",
                 max_tokens=512,
                 temperature=0.2

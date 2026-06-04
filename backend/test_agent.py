@@ -6,13 +6,13 @@ from ai_agent import chat_with_llm
 from prompt_manager import get_full_system_prompt
 from logger import get_recent_logs
 
-def test_chat(user_message: str):
+def test_chat(user_message: str, user_id="boss"):
     print(f"\n[{'='*40}]")
-    print(f"👤 模拟用户输入: {user_message}")
+    print(f"👤 模拟用户[{user_id}]输入: {user_message}")
     print(f"[{'-'*40}]")
     
     db: Session = next(get_db())
-    response = chat_with_llm(user_message, user_id="boss", project_id="p1", session_id="test_session", db=db)
+    response = chat_with_llm(user_message, user_id=user_id, project_id="p1", session_id="test_session", db=db)
     
     print(f"🤖 AI 回复: {response}")
     print(f"[{'='*40}]\n")
@@ -22,7 +22,7 @@ def show_logs():
     logs = get_recent_logs(5)
     for log in logs:
         print(f"[{log['timestamp']}]")
-        print(f"👤: {log['user_message']}")
+        print(f"👤[{log['user_id']}]: {log['user_message']}")
         if log['tools_used']:
             print(f"🔧 (Tools: {', '.join(log['tools_used'])})")
         print(f"🤖: {log['ai_response']}\n")
@@ -49,9 +49,7 @@ if __name__ == "__main__":
             print("  python test_agent.py prompt")
     else:
         # 默认执行一个测试流程
-        test_chat("达梦这个项目总预算多少？")
-        test_chat("以后都叫我大老板")
-        # 重新测试问候
-        test_chat("你好，我是谁？")
-        show_prompt()
+        test_chat("达梦这个项目总预算多少？", "boss")
+        test_chat("去催一下他们进度", "boss")
+        test_chat("明天就能交片", "employee")
         show_logs()
