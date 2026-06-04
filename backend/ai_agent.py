@@ -100,7 +100,7 @@ def parse_budget_target(message: str) -> Optional[float]:
         return float(digits)
     return None
 
-def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session) -> str:
+def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
     if any(key in user_message for key in ["叫我", "以后", "记住", "偏好", "规则"]):
         content = add_user_preference(user_message)
         content = f"好的，{content}"
@@ -137,7 +137,10 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, db: Session)
             )
 
     # 1. 获取历史记录（最近10条）
-    history = db.query(models.Message).filter(models.Message.project_id == project_id).order_by(models.Message.timestamp.desc()).limit(10).all()
+    history = db.query(models.Message).filter(
+        models.Message.project_id == project_id,
+        models.Message.session_id == session_id
+    ).order_by(models.Message.timestamp.desc()).limit(10).all()
     history = list(reversed(history))
     
     # 获取包含用户偏好的完整 Prompt

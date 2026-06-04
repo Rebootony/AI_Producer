@@ -58,6 +58,7 @@ class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(String, ForeignKey("projects.id"))
+    session_id = Column(String, default="default", index=True)
     sender_id = Column(String, ForeignKey("users.id"))
     content = Column(String)
     target_role = Column(String, nullable=True)

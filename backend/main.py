@@ -75,11 +75,13 @@ class ChatRequest(BaseModel):
     user_id: str
     role: str # 'boss' 或 'employee'
     project_id: str = "p1"
+    session_id: str = "default"
 
 class RelayRequest(BaseModel):
     project_id: str
     target_role: str
     content: str
+    session_id: str = "default"
 
 @app.get("/")
 def read_root():
@@ -92,13 +94,39 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         return {"id": project.id, "name": project.name, "status": project.status, "budget": project.budget}
     raise HTTPException(status_code=404, detail="Project not found")
 
+@app.get("/api/messages/{project_id}/sessions")
+def get_sessions(project_id: str, db: Session = Depends(get_db)):
+    # Group by session_id and get the latest message timestamp
+    # Since sqlite doesn't easily support simple group by with latest in ORM, we can do it via a subquery or python side
+    messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
+    sessions = {}
+    for m in messages:
+        if m.session_id not in sessions:
+            sessions[m.session_id] = {"id": m.session_id, "timestamp": m.timestamp}
+        else:
+            if m.timestamp > sessions[m.session_id]["timestamp"]:
+                sessions[m.session_id]["timestamp"] = m.timestamp
+    
+    # Sort sessions by timestamp desc
+    sorted_sessions = sorted(sessions.values(), key=lambda x: x["timestamp"], reverse=True)
+    return {"sessions": sorted_sessions}
+
+@app.delete("/api/messages/{project_id}/{session_id}")
+def delete_session(project_id: str, session_id: str, db: Session = Depends(get_db)):
+    db.query(models.Message).filter(models.Message.project_id == project_id, models.Message.session_id == session_id).delete()
+    db.commit()
+    return {"status": "ok"}
+
 @app.get("/api/messages/{project_id}")
-def get_messages(project_id: str, role: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.Message).filter(models.Message.project_id == project_id)
+def get_messages(project_id: str, session_id: str = "default", role: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Message).filter(
+        models.Message.project_id == project_id,
+        models.Message.session_id == session_id
+    )
     if role:
         query = query.filter(or_(models.Message.target_role == None, models.Message.target_role == role))
     messages = query.order_by(models.Message.timestamp.asc()).all()
-    return {"messages": [{"role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
+    return {"messages": [{"id": m.id, "role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
 
 from ai_agent import chat_with_llm, get_config_snapshot
 
@@ -108,21 +136,22 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     处理与大模型的对话，并维持记忆
     """
     # 存入用户消息
-    user_msg = models.Message(project_id=req.project_id, sender_id=req.user_id, content=req.message, target_role=req.role)
+    user_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id=req.user_id, content=req.message, target_role=req.role)
     db.add(user_msg)
     db.commit()
     
     # 调用大模型并执行 Function Calling
-    reply = chat_with_llm(req.message, req.user_id, req.project_id, db)
+    reply = chat_with_llm(req.message, req.user_id, req.project_id, req.session_id, db)
     
     # 存入 AI 回复
-    ai_msg = models.Message(project_id=req.project_id, sender_id="ai_producer", content=reply, target_role=req.role)
+    ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
     db.add(ai_msg)
     db.commit()
 
     if req.role == "employee":
         boss_msg = models.Message(
             project_id=req.project_id,
+            session_id=req.session_id,
             sender_id="ai_producer",
             content=f"【员工回复回传】{req.message}",
             target_role="boss"
@@ -140,6 +169,7 @@ def health():
 def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):
     ai_to_target = models.Message(
         project_id=req.project_id,
+        session_id=req.session_id,
         sender_id="ai_producer",
         content=req.content,
         target_role=req.target_role
@@ -149,6 +179,7 @@ def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):
     if req.target_role == "employee":
         boss_notice = models.Message(
             project_id=req.project_id,
+            session_id=req.session_id,
             sender_id="ai_producer",
             content=f"【AI已主动联系员工】{req.content}",
             target_role="boss"

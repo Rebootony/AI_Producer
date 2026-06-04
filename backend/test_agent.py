@@ -12,7 +12,7 @@ def test_chat(user_message: str):
     print(f"[{'-'*40}]")
     
     db: Session = next(get_db())
-    response = chat_with_llm(user_message, user_id="boss", project_id="p1", db=db)
+    response = chat_with_llm(user_message, user_id="boss", project_id="p1", session_id="test_session", db=db)
     
     print(f"🤖 AI 回复: {response}")
     print(f"[{'='*40}]\n")

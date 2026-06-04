@@ -41,6 +41,11 @@ export interface Project {
   health: 'good' | 'warning' | 'danger';
 }
 
+export interface Session {
+  id: string;
+  timestamp: string;
+}
+
 interface AppState {
   currentUser: CurrentUser | null;
   login: (user: CurrentUser) => void;
@@ -54,6 +59,12 @@ interface AppState {
   
   currentProjectId: string | null;
   setCurrentProject: (id: string) => void;
+
+  currentSessionId: string;
+  setCurrentSessionId: (id: string) => void;
+  
+  sessions: Session[];
+  setSessions: (sessions: Session[]) => void;
 
   projects: Project[];
   addProject: (project: Project) => void;
@@ -116,7 +127,13 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   
   currentProjectId: null,
-  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project', activeTab: 'overview' }),
+  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project', activeTab: 'overview', currentSessionId: 'default' }),
+  
+  currentSessionId: 'default',
+  setCurrentSessionId: (id) => set({ currentSessionId: id }),
+  
+  sessions: [],
+  setSessions: (sessions) => set({ sessions }),
   
   projects: initialProjects,
   addProject: (project) => set((state) => ({ projects: [project, ...state.projects] })),

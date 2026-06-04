@@ -1,23 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils';
-import { Send, Bot, User, Paperclip, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Paperclip, Loader2, Plus, Trash2, List } from 'lucide-react';
 
 export function ChatSidebar() {
-  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject } = useStore();
+  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject, currentSessionId, setCurrentSessionId, sessions, setSessions } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchSessions = async () => {
+    const projectId = currentProjectId || 'p1';
+    try {
+      const res = await fetch(`/api/messages/${projectId}/sessions`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessions(data.sessions || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch sessions', e);
+    }
+  };
 
   const fetchMessages = async () => {
     const projectId = currentProjectId || 'p1';
     try {
-      const roleParam = currentUser ? `?role=${currentUser.role}` : '';
-      const res = await fetch(`/api/messages/${projectId}${roleParam}`);
+      const roleParam = currentUser ? `&role=${currentUser.role}` : '';
+      const res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}`);
       if (res.ok) {
         const data = await res.json();
         const mapped = data.messages.map((m: any, index: number) => ({
-          id: index.toString(),
+          id: m.id.toString(),
           role: currentUser && m.user_id === currentUser.id ? 'user' : 'ai',
           content: m.content,
           timestamp: new Date(m.timestamp)
@@ -35,9 +49,10 @@ export function ChatSidebar() {
 
   useEffect(() => {
     if (currentUser) {
+      fetchSessions();
       fetchMessages();
     }
-  }, [currentProjectId, currentUser]);
+  }, [currentProjectId, currentUser, currentSessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,7 +77,8 @@ export function ChatSidebar() {
           message: userText,
           user_id: currentUser.id,
           role: currentUser.role,
-          project_id: currentProjectId || 'p1'
+          project_id: currentProjectId || 'p1',
+          session_id: currentSessionId
         })
       });
 
@@ -76,6 +92,9 @@ export function ChatSidebar() {
            const pData = await projectRes.json();
            updateProject(currentProjectId || 'p1', { budget: pData.budget, status: pData.status === 'planning' ? 'planning' : 'in_progress' });
         }
+        
+        // Refresh sessions to ensure current session is listed
+        fetchSessions();
       }
     } catch (error) {
       addMessage({ role: 'ai', content: '（网络错误，无法连接后端模型服务）' });
@@ -96,7 +115,8 @@ export function ChatSidebar() {
         body: JSON.stringify({
           project_id: currentProjectId || 'p1',
           target_role: 'employee',
-          content: '请在今天18:00前回复排期进度与下一步风险点。'
+          content: '请在今天18:00前回复排期进度与下一步风险点。',
+          session_id: currentSessionId
         })
       });
       fetchMessages();
@@ -105,20 +125,92 @@ export function ChatSidebar() {
     }
   };
 
+  const createNewSession = () => {
+    const newId = `session_${Date.now()}`;
+    setCurrentSessionId(newId);
+    setShowSessions(false);
+  };
+
+  const deleteCurrentSession = async () => {
+    if (!confirm('确定要删除当前对话吗？')) return;
+    const projectId = currentProjectId || 'p1';
+    try {
+      await fetch(`/api/messages/${projectId}/${currentSessionId}`, { method: 'DELETE' });
+      setCurrentSessionId('default');
+      fetchSessions();
+      setShowSessions(false);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-zinc-50 border-r border-zinc-200 w-[400px] shrink-0">
+    <div className="flex flex-col h-full bg-zinc-50 border-r border-zinc-200 w-[400px] shrink-0 relative">
       {/* Header */}
-      <div className="p-4 border-b border-zinc-200 bg-white flex items-center space-x-3">
-        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white">
-          <Bot size={20} />
+      <div className="p-4 border-b border-zinc-200 bg-white flex items-center justify-between relative">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white">
+            <Bot size={20} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-zinc-800">AI 制片人</h2>
+            <p className="text-xs text-green-600 flex items-center">
+              <span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span>
+              随时在线
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-semibold text-zinc-800">AI 制片人</h2>
-          <p className="text-xs text-green-600 flex items-center">
-            <span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span>
-            随时在线
-          </p>
+        <div className="flex space-x-2">
+          <button
+            type="button"
+            onClick={() => setShowSessions(!showSessions)}
+            className="p-2 text-zinc-400 hover:text-zinc-700 transition-colors rounded-md hover:bg-zinc-100"
+            title="历史对话"
+          >
+            <List size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={createNewSession}
+            className="p-2 text-zinc-400 hover:text-zinc-700 transition-colors rounded-md hover:bg-zinc-100"
+            title="新建对话"
+          >
+            <Plus size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={deleteCurrentSession}
+            className="p-2 text-red-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
+            title="删除对话"
+          >
+            <Trash2 size={18} />
+          </button>
         </div>
+        
+        {/* Sessions Dropdown */}
+        {showSessions && (
+          <div className="absolute top-16 right-4 w-64 bg-white border border-zinc-200 shadow-lg rounded-xl z-50 overflow-hidden">
+            <div className="p-3 border-b border-zinc-100 bg-zinc-50 font-medium text-sm text-zinc-600">历史对话记录</div>
+            <div className="max-h-60 overflow-y-auto">
+              {sessions.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => { setCurrentSessionId(s.id); setShowSessions(false); }}
+                  className={cn(
+                    "w-full text-left px-4 py-3 text-sm border-b border-zinc-100 hover:bg-blue-50 transition-colors",
+                    s.id === currentSessionId ? "bg-blue-50/50 font-medium text-blue-600" : "text-zinc-700"
+                  )}
+                >
+                  <div className="truncate">对话 {s.id.replace('session_', '')}</div>
+                  <div className="text-xs text-zinc-400 mt-1">{new Date(s.timestamp).toLocaleString()}</div>
+                </button>
+              ))}
+              {sessions.length === 0 && (
+                <div className="p-4 text-center text-sm text-zinc-500">暂无历史对话</div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
