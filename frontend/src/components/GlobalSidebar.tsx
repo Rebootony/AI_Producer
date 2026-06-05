@@ -56,10 +56,6 @@ export function GlobalSidebar() {
   useEffect(() => {
     if (!currentProjectId) return;
     
-    // 当切换项目时，由于 currentSessionId 被置空，我们需要立即拉取新项目的 sessions
-    // 并清空旧项目的 sessions 状态，防止在请求回来前显示旧项目的对话
-    setSessions([]);
-    
     fetchSessions(currentProjectId);
     
     const intervalId = setInterval(() => {
@@ -79,9 +75,9 @@ export function GlobalSidebar() {
       });
       if (res.ok) {
         const data = await res.json();
-        // 主动插入新 session 以触发立刻更新 UI
         const newThread = { id: data.id, name: data.name, timestamp: new Date().toISOString(), unreadCount: 0 };
-        setSessions([newThread, ...sessions]);
+        const current = useStore.getState().sessions || [];
+        setSessions([newThread, ...current]);
         setCurrentSessionId(data.id);
         setView('project_chat');
       }

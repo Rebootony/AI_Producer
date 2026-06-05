@@ -146,6 +146,8 @@ def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depen
 
 @app.put("/api/projects/{project_id}/threads/{thread_id}")
 def update_thread(project_id: str, thread_id: str, req: ThreadRequest, db: Session = Depends(get_db)):
+    if thread_id == "default":
+        return {"status": "error", "message": "主频道不可重命名"}
     thread = db.query(models.ChatThread).filter(models.ChatThread.id == thread_id, models.ChatThread.project_id == project_id).first()
     if thread:
         thread.name = req.name

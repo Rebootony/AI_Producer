@@ -6,21 +6,19 @@ echo ========================================
 echo    AI Producer - 一键启动脚本 (Windows)
 echo ========================================
 
-where python >nul 2>nul
-if %errorlevel% neq 0 (
+where python >nul 2>nul || (
     echo 错误: 未安装 Python! 
     echo 请前往 https://www.python.org/downloads/ 下载安装
     echo (注意: 安装时请务必勾选底部 "Add Python.exe to PATH" 选项!!!)
     pause
-    exit /b
+    exit /b 1
 )
 
-where npm >nul 2>nul
-if %errorlevel% neq 0 (
+where npm >nul 2>nul || (
     echo 错误: 未安装 Node.js! 
     echo 请前往 https://nodejs.org/ 下载安装
     pause
-    exit /b
+    exit /b 1
 )
 
 echo.
@@ -34,14 +32,24 @@ cd backend
 if not exist "venv" (
     python -m venv venv
 )
-call venv\Scripts\activate
-pip install -r requirements.txt >nul
+if not exist "venv\Scripts\activate.bat" (
+    echo 错误: 虚拟环境创建失败 (未找到 venv\Scripts\activate.bat)
+    pause
+    exit /b 1
+)
+call venv\Scripts\activate.bat
+pip --version >nul 2>nul || (
+    echo 错误: pip 不可用。请确认 Python 安装完整，或重新创建 venv。
+    pause
+    exit /b 1
+)
+pip install -r requirements.txt
 start "AI Producer Backend" /MIN cmd /c "uvicorn main:app --host 127.0.0.1 --port 8000"
 cd ..
 
 echo ^>^>^> [2/2] 正在准备前端服务 (可能会下载依赖，请耐心等待)...
 cd frontend
-call npm install >nul
+call npm install
 start "AI Producer Frontend" /MIN cmd /c "npm run dev"
 cd ..
 

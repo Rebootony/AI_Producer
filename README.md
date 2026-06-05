@@ -16,20 +16,30 @@
 请确保您的电脑已经安装了 **Python 3.8** 或以上版本。
 
 ### Windows 系统启动步骤
-1. 打开命令提示符（cmd）或 PowerShell，进入 `backend` 目录：
+1. （推荐）直接在项目根目录运行一键脚本：
+   ```cmd
+   start_windows.bat
+   ```
+2. 或者手动启动。先进入 `backend` 目录：
    ```cmd
    cd producer\backend
    ```
-2. （推荐）创建并激活虚拟环境：
-   ```cmd
-   python -m venv venv
-   .\venv\Scripts\activate
-   ```
-3. 安装依赖包：
+3. 创建并激活虚拟环境（注意：cmd 与 PowerShell 写法不同）：
+   - cmd：
+     ```cmd
+     python -m venv venv
+     venv\Scripts\activate.bat
+     ```
+   - PowerShell：
+     ```powershell
+     python -m venv venv
+     .\venv\Scripts\Activate.ps1
+     ```
+4. 安装依赖包：
    ```cmd
    pip install -r requirements.txt
    ```
-4. 启动服务：
+5. 启动服务：
    ```cmd
    python main.py
    ```
