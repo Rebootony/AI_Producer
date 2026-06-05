@@ -13,19 +13,32 @@ export function ChatSidebar() {
     const projectId = currentProjectId || 'p1';
     try {
       const roleParam = currentUser ? `&role=${currentUser.role}` : '';
-      const res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}`);
+      const res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}&t=${Date.now()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
-        const mapped = data.messages.map((m: any, index: number) => ({
+        const mapped = data.messages.map((m: any) => ({
           id: m.id.toString(),
-          role: currentUser && m.user_id === currentUser.id ? 'user' : 'ai',
+          role: m.role,
           content: m.content,
           timestamp: new Date(m.timestamp)
         }));
         if (mapped.length === 0) {
-          setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
+          if (useStore.getState().messages.length !== 1 || useStore.getState().messages[0].id !== 'init') {
+            setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
+          }
         } else {
-          setMessages(mapped);
+          const currentMessages = useStore.getState().messages;
+          const isSame = currentMessages.length === mapped.length && 
+                         currentMessages[currentMessages.length - 1]?.id === mapped[mapped.length - 1]?.id;
+          if (!isSame) {
+            setMessages(mapped);
+          }
         }
       }
     } catch (e) {
@@ -48,7 +61,7 @@ export function ChatSidebar() {
     return () => clearInterval(intervalId);
   }, [currentProjectId, currentUser, currentSessionId]);
 
-  // 当选中某个 session 时，如果该 session 有未读红点，本地清除它
+  // 当选中某个 session 时，本地乐观清除红点（后端会在 fetchMessages 时自动标记已读）
   useEffect(() => {
     if (currentSessionId && sessions.length > 0) {
        setSessions(sessions.map(s => 
@@ -59,7 +72,7 @@ export function ChatSidebar() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,15 +167,19 @@ export function ChatSidebar() {
           >
             <div className={cn(
               "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-              msg.role === 'user' ? "bg-zinc-800 text-white" : "bg-blue-600 text-white"
+              msg.role === 'user' ? "bg-zinc-800 text-white" : 
+              msg.role === 'employee' ? "bg-green-600 text-white" : "bg-blue-600 text-white"
             )}>
-              {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+              {msg.role === 'user' ? <User size={16} /> : 
+               msg.role === 'employee' ? <span className="text-xs font-bold">员工</span> : <Bot size={16} />}
             </div>
             <div className="flex flex-col">
               <div className={cn(
                 "p-3 rounded-2xl text-sm leading-relaxed shadow-sm",
                 msg.role === 'user' 
                   ? "bg-zinc-800 text-white rounded-tr-sm" 
+                  : msg.role === 'employee'
+                  ? "bg-green-50 text-green-900 border border-green-100 rounded-tl-sm"
                   : "bg-white text-zinc-800 border border-zinc-100 rounded-tl-sm"
               )}>
                 {msg.content}

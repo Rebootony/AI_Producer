@@ -78,6 +78,7 @@ class Message(Base):
     content = Column(String)
     target_role = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=get_utc_8)
+    is_read = Column(Integer, default=0)
     
     project = relationship("Project", back_populates="messages")
     sender = relationship("User")

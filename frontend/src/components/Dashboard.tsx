@@ -14,7 +14,7 @@ export function Dashboard() {
       <div className="max-w-6xl mx-auto animate-in fade-in duration-500">
         <div className="mb-10">
           <h1 className="text-3xl font-bold text-zinc-900">全局项目大盘</h1>
-          <p className="text-zinc-500 mt-2">AI 制片人协助您同时管理多个制片项目，保障预算与进度。</p>
+          <p className="text-zinc-500 mt-2">AI 制片协助您同时管理多个制片项目，保障预算与进度。</p>
         </div>
 
         {/* Global Metrics for Investors */}

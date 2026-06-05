@@ -13,11 +13,40 @@ export function GlobalSidebar() {
 
   const fetchSessions = async (projectId: string) => {
     try {
-      const roleParam = currentUser ? `?role=${currentUser.role}` : '';
-      const res = await fetch(`/api/projects/${projectId}/threads${roleParam}`);
+      const roleParam = currentUser ? `role=${currentUser.role}&` : '';
+      const res = await fetch(`/api/projects/${projectId}/threads?${roleParam}t=${Date.now()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
-        setSessions(data.threads || []);
+        const threads = data.threads || [];
+        
+        // 如果当前是进入项目且没有选中 session，尝试默认选中 default
+        // 注意：只有在项目刚加载，且 currentSessionId 为 null 时才执行
+        if (useStore.getState().currentSessionId === null && threads.length > 0) {
+          const defaultThread = threads.find((t: any) => t.id === 'default');
+          if (defaultThread) {
+            useStore.getState().setCurrentSessionId('default');
+          } else {
+            // 如果没有 default，选中第一个
+            useStore.getState().setCurrentSessionId(threads[0].id);
+          }
+        }
+        
+        // 乐观处理：当前正在查看的 session 强制不显示红点
+        const updatedThreads = threads.map((t: any) => 
+           t.id === useStore.getState().currentSessionId ? { ...t, unreadCount: 0 } : t
+        );
+        
+        const currentSessions = useStore.getState().sessions;
+        const isSame = JSON.stringify(currentSessions) === JSON.stringify(updatedThreads);
+        if (!isSame) {
+          setSessions(updatedThreads);
+        }
       }
     } catch (e) {
       console.error('Failed to fetch threads', e);
@@ -25,9 +54,19 @@ export function GlobalSidebar() {
   };
 
   useEffect(() => {
-    if (currentProjectId) {
+    if (!currentProjectId) return;
+    
+    // 当切换项目时，由于 currentSessionId 被置空，我们需要立即拉取新项目的 sessions
+    // 并清空旧项目的 sessions 状态，防止在请求回来前显示旧项目的对话
+    setSessions([]);
+    
+    fetchSessions(currentProjectId);
+    
+    const intervalId = setInterval(() => {
       fetchSessions(currentProjectId);
-    }
+    }, 3000);
+    
+    return () => clearInterval(intervalId);
   }, [currentProjectId, currentUser]);
 
   const createNewThread = async () => {
@@ -40,8 +79,11 @@ export function GlobalSidebar() {
       });
       if (res.ok) {
         const data = await res.json();
-        await fetchSessions(currentProjectId);
+        // 主动插入新 session 以触发立刻更新 UI
+        const newThread = { id: data.id, name: data.name, timestamp: new Date().toISOString(), unreadCount: 0 };
+        setSessions([newThread, ...sessions]);
         setCurrentSessionId(data.id);
+        setView('project_chat');
       }
     } catch (e) {
       console.error('Failed to create thread', e);
@@ -162,7 +204,7 @@ export function GlobalSidebar() {
                 onClick={() => setCurrentSessionId(s.id)}
                 className={cn(
                   "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors relative group flex items-center justify-between",
-                  s.id === currentSessionId && view === 'project'
+                  s.id === currentSessionId && view === 'project_chat'
                     ? "bg-blue-600/20 text-blue-400 font-medium" 
                     : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
                 )}

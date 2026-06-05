@@ -2,7 +2,7 @@
 
 ## 1. 核心功能 (16 Core Functions / Skills)
 
-基于目前的看板（Overview, Budget, Timeline, Assets）与项目资料（Brief、报价单、执行周期表），AI 制片人（Agent）具备以下 16 项核心功能：
+基于目前的看板（Overview, Budget, Timeline, Assets）与项目资料（Brief、报价单、执行周期表），AI 制片（Agent）具备以下 16 项核心功能：
 
 1. **`get_project_overview` (读取项目概览)**
    - **功能**: 获取客户信息、核心目标、整体制作周期与总预算。
@@ -79,7 +79,7 @@ graph TD
     
     Frontend <-->|"API/HTTP"| Backend["后端 API (FastAPI)"]
     
-    subgraph AI_Producer_Agent ["AI 制片人 Agent"]
+    subgraph AI_Producer_Agent ["AI 制片 Agent"]
         Router["意图路由 & 提示词引擎"]
         LLM["大语言模型 Model (e.g. Qwen2.5 / DeepSeek)"]
         

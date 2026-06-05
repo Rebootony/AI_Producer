@@ -29,7 +29,7 @@ function App() {
           <div className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'dashboard' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-zinc-400'}`}>
             大盘总览
           </div>
-          {view === 'project' && currentProject && (
+          {(view === 'project_dashboard' || view === 'project_chat') && currentProject && (
             <>
               <span className="text-zinc-600">/</span>
               <div className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-md text-sm font-medium">
@@ -52,7 +52,7 @@ function App() {
       {/* Main Layout */}
       <main className="flex-1 flex overflow-hidden">
         <GlobalSidebar />
-        {view === 'project' && <ChatSidebar />}
+        {view === 'project_chat' && <ChatSidebar />}
         {view === 'dashboard' ? <Dashboard /> : <Workspace />}
       </main>
     </div>

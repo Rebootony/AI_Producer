@@ -14,7 +14,7 @@
 
 - [x] **Todo 3: 接入大模型**
   - **状态**: `completed`
-  - **详情**: 对接硅基流动 API，设定“AI 制片人” System Prompt，并将历史消息作为上下文传递给大模型。
+  - **详情**: 对接硅基流动 API，设定“AI 制片” System Prompt，并将历史消息作为上下文传递给大模型。
 
 - [x] **Todo 4: 实现核心 Function Calling**
   - **状态**: `completed`

@@ -116,7 +116,7 @@ def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depen
     
     # 默认存在一个 "default" session，为了兼容之前的逻辑
     if "default" not in threads_dict:
-        threads_dict["default"] = {"id": "default", "name": "常规事务", "timestamp": models.get_utc_8(), "unreadCount": 0}
+        threads_dict["default"] = {"id": "default", "name": "主频道", "timestamp": models.get_utc_8(), "unreadCount": 0}
 
     messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
     for m in messages:
@@ -127,7 +127,7 @@ def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depen
             if m.timestamp > threads_dict[m.session_id]["timestamp"]:
                 threads_dict[m.session_id]["timestamp"] = m.timestamp
         
-        if role and m.target_role == role and m.sender_id == "ai_producer":
+        if role and m.target_role == role and m.sender_id == "ai_producer" and not m.is_read:
              threads_dict[m.session_id]["unreadCount"] += 1
     
     sorted_threads = sorted(threads_dict.values(), key=lambda x: x["timestamp"], reverse=True)
@@ -148,6 +148,17 @@ def delete_thread(project_id: str, thread_id: str, db: Session = Depends(get_db)
     db.commit()
     return {"status": "ok"}
 
+@app.post("/api/projects/{project_id}/threads/{thread_id}/read")
+def mark_thread_read(project_id: str, thread_id: str, role: str, db: Session = Depends(get_db)):
+    db.query(models.Message).filter(
+        models.Message.project_id == project_id,
+        models.Message.session_id == thread_id,
+        models.Message.target_role == role,
+        models.Message.is_read == 0
+    ).update({"is_read": 1})
+    db.commit()
+    return {"status": "ok"}
+
 @app.get("/api/messages/{project_id}")
 def get_messages(project_id: str, session_id: str = "default", role: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Message).filter(
@@ -155,11 +166,6 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
         models.Message.session_id == session_id
     )
     if role:
-        # 如果是某个角色获取消息，他们能看到：
-        # 1. 目标角色是他们的消息 (target_role == role)
-        # 2. 目标角色是所有人/没有特定角色的消息 (target_role == None)
-        # 3. 发送者是他们自己的消息 (sender_id == role) -> 虽然通常发送给自己不需要过滤，但为了完整性。最重要的还是 1 和 2。
-        # 重点修正：员工应该能看到老板让 AI 发给员工的消息（target_role == 'employee'）。
         query = query.filter(
             or_(
                 models.Message.target_role == None, 
@@ -168,7 +174,27 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
             )
         )
     messages = query.order_by(models.Message.timestamp.asc()).all()
-    return {"messages": [{"id": m.id, "role": m.sender.role, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp} for m in messages]}
+    
+    if role:
+        # 自动将获取到的发送给该角色的消息标记为已读
+        unread_messages = [m for m in messages if m.target_role == role and m.is_read == 0 and m.sender_id == "ai_producer"]
+        for m in unread_messages:
+            m.is_read = 1
+        if unread_messages:
+            db.commit()
+            
+    # 特殊处理：如果是老板，把 sender_id 修正为实际名字或 AI，如果发信人是 employee，应该显示 employee
+    res = []
+    for m in messages:
+        r = "ai"
+        if m.sender_id == role:
+            r = "user"
+        elif m.sender_id == "employee" and role == "boss":
+            r = "employee"
+            
+        res.append({"id": m.id, "role": r, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp})
+        
+    return {"messages": res}
 
 from ai_agent import chat_with_llm, get_config_snapshot
 
@@ -199,9 +225,9 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     # 在 ai_agent.py 中，如果走的是工具 report_to_boss，其实 reply 是 "好的，已执行操作。"
     # 但如果由于某种原因 reply 被大模型生成了包含 "老板" 的话语，且当前是 employee，我们直接替换。
     if reply:
-        if req.role == "employee" and "老板" in reply and "说" in reply:
+        if req.role == "employee" and ("老板" in reply or "汇报" in reply):
             # 如果大模型出现幻觉，把该发给老板的话当成了普通回复返回了，强制替换
-            reply = "好的，我已经向老板汇报了你的进度。"
+            reply = "收到，情况我已了解，继续推进。"
             
         ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
         db.add(ai_msg)
@@ -229,7 +255,7 @@ def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):
             project_id=req.project_id,
             session_id=req.session_id,
             sender_id="ai_producer",
-            content=f"【AI已主动联系员工】{req.content}",
+            content=f"已发送指令给员工，等待回复。",
             target_role="boss"
         )
         db.add(boss_notice)

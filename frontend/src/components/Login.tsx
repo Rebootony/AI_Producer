@@ -34,7 +34,7 @@ export function Login() {
         <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl mx-auto mb-6">
           <Video size={32} />
         </div>
-        <h2 className="text-3xl font-extrabold text-zinc-900">AI 虚拟制片人工作台</h2>
+        <h2 className="text-3xl font-extrabold text-zinc-900">AI 制片工作台</h2>
         <p className="mt-2 text-sm text-zinc-600">
           请选择您要扮演的角色以进入系统
         </p>

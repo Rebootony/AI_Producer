@@ -1,6 +1,6 @@
-# AI 制片人 (AI Producer) - 本地全栈运行指南
+# AI 制片 (AI Producer) - 本地全栈运行指南
 
-本项目分为前端（React + Vite）和后端（Python + FastAPI）。通过前后端联动，实现 AI 虚拟制片人与不同角色（老板、员工）的动态交互。
+本项目分为前端（React + Vite）和后端（Python + FastAPI）。通过前后端联动，实现 AI 虚拟制片与不同角色（老板、员工）的动态交互。
 
 ## 目录结构
 - `/frontend` - 前端界面代码
