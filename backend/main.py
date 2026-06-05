@@ -22,6 +22,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from datetime import timezone, timedelta
+
+def ensure_tz(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone(timedelta(hours=8)))
+    return dt
+
 # 初始化默认数据
 def init_db(db: Session):
     if not db.query(models.User).first():
@@ -112,7 +121,7 @@ def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depen
     # 如果要完全重构，就直接从 ChatThread 表里查。
     # 这里我们返回所有的 thread 列表，并附加 unreadCount。
     threads_db = db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id).all()
-    threads_dict = {t.id: {"id": t.id, "name": t.name, "timestamp": t.updated_at, "unreadCount": 0} for t in threads_db}
+    threads_dict = {t.id: {"id": t.id, "name": t.name, "timestamp": ensure_tz(t.updated_at), "unreadCount": 0} for t in threads_db}
     
     # 默认存在一个 "default" session，为了兼容之前的逻辑
     if "default" not in threads_dict:
@@ -120,12 +129,14 @@ def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depen
 
     messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
     for m in messages:
+        m_ts = ensure_tz(m.timestamp)
         if m.session_id not in threads_dict:
             # 如果是历史遗留的 session_id 没有在 thread 表里
-            threads_dict[m.session_id] = {"id": m.session_id, "name": f"对话 {m.session_id.replace('session_', '')}", "timestamp": m.timestamp, "unreadCount": 0}
+            threads_dict[m.session_id] = {"id": m.session_id, "name": f"对话 {m.session_id.replace('session_', '')}", "timestamp": m_ts, "unreadCount": 0}
         else:
-            if m.timestamp > threads_dict[m.session_id]["timestamp"]:
-                threads_dict[m.session_id]["timestamp"] = m.timestamp
+            t_ts = threads_dict[m.session_id]["timestamp"]
+            if m_ts and t_ts and m_ts > t_ts:
+                threads_dict[m.session_id]["timestamp"] = m_ts
         
         if role and m.target_role == role and m.sender_id == "ai_producer" and not m.is_read:
              threads_dict[m.session_id]["unreadCount"] += 1
@@ -143,6 +154,8 @@ def update_thread(project_id: str, thread_id: str, req: ThreadRequest, db: Sessi
 
 @app.delete("/api/projects/{project_id}/threads/{thread_id}")
 def delete_thread(project_id: str, thread_id: str, db: Session = Depends(get_db)):
+    if thread_id == "default":
+        return {"status": "error", "message": "主频道不可删除"}
     db.query(models.Message).filter(models.Message.project_id == project_id, models.Message.session_id == thread_id).delete()
     db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id, models.ChatThread.id == thread_id).delete()
     db.commit()
@@ -192,7 +205,7 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
         elif m.sender_id == "employee" and role == "boss":
             r = "employee"
             
-        res.append({"id": m.id, "role": r, "content": m.content, "user_id": m.sender_id, "timestamp": m.timestamp})
+        res.append({"id": m.id, "role": r, "content": m.content, "user_id": m.sender_id, "timestamp": ensure_tz(m.timestamp)})
         
     return {"messages": res}
 

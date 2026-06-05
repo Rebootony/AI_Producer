@@ -117,6 +117,10 @@ export function ChatSidebar() {
   };
 
   const deleteCurrentSession = async () => {
+    if (currentSessionId === 'default') {
+      alert('主频道不可删除');
+      return;
+    }
     if (!confirm('确定要删除当前对话吗？')) return;
     const projectId = currentProjectId || 'p1';
     try {
@@ -144,14 +148,16 @@ export function ChatSidebar() {
           </div>
         </div>
         <div className="flex space-x-2">
-          <button
-            type="button"
-            onClick={deleteCurrentSession}
-            className="p-2 text-red-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
-            title="删除对话"
-          >
-            <Trash2 size={18} />
-          </button>
+          {currentSessionId !== 'default' && (
+            <button
+              type="button"
+              onClick={deleteCurrentSession}
+              className="p-2 text-red-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
+              title="删除对话"
+            >
+              <Trash2 size={18} />
+            </button>
+          )}
         </div>
       </div>
 

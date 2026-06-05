@@ -94,3 +94,8 @@
 {"timestamp": "2026-06-04T17:25:52.073871", "project_id": "p1", "user_id": "employee", "user_message": "好的", "ai_response": "\n\n已同步大老板，员工说要立刻开始干活。", "tools_used": ["report_to_boss"]}
 {"timestamp": "2026-06-04T17:28:27.849496", "project_id": "p1", "user_id": "boss", "user_message": "跟员工说再不干就裁了", "ai_response": "好的，已执行操作。", "tools_used": ["transfer_message"]}
 {"timestamp": "2026-06-04T17:30:32.573422", "project_id": "p2", "user_id": "employee", "user_message": "？", "ai_response": "\n\n大老板，系统显示找不到p2项目，您确认下项目ID有没有写错？", "tools_used": ["report_to_boss"]}
+{"timestamp": "2026-06-05T15:49:27.831432", "project_id": "p1", "user_id": "boss", "user_message": "预算多少钱", "ai_response": "\n\n大老板，总预算30万，前期、拍摄、后期费用明细我这边有，需要的话随时叫您。", "tools_used": ["get_project_overview"]}
+{"timestamp": "2026-06-05T15:49:52.277422", "project_id": "p1", "user_id": "boss", "user_message": "问问张导进度如何", "ai_response": "好的，我已经向员工发送了指令，请等待员工回复。", "tools_used": ["ask_employee_schedule"]}
+{"timestamp": "2026-06-05T15:51:31.493277", "project_id": "p1", "user_id": "employee", "user_message": "进展顺利 但可能需要更多的预算 稍后再联系", "ai_response": "\n\n大老板，进展顺利，但可能需要追加预算，稍后再联系。", "tools_used": ["report_to_boss"]}
+{"timestamp": "2026-06-05T15:52:52.621340", "project_id": "p1", "user_id": "boss", "user_message": "问问张导有没有卡点", "ai_response": "好的，我已经向员工发送了指令，请等待员工回复。", "tools_used": ["ask_employee_risk"]}
+{"timestamp": "2026-06-05T15:53:55.538363", "project_id": "p1", "user_id": "employee", "user_message": "摄影不干了，需要找新的人", "ai_response": "\n\n摄影不干了，得找人顶上。大老板，这事儿得您定夺。", "tools_used": ["report_to_boss"]}
