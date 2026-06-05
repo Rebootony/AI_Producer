@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPTS_DIR = BASE_DIR / "prompts"
@@ -64,15 +65,63 @@ def get_full_system_prompt() -> str:
     full_prompt = f"{base}\n\n【长期用户偏好与指令 (Highest Priority)】\n{prefs}"
     return full_prompt
 
+def _normalize_preference(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        return ""
+    t = re.sub(r"^[\-\*\u2022]\s*", "", t)
+    t = re.sub(r"^(请保存一个规则[:：]?|请记住规则[:：]?|请记住[:：]?|请保存[:：]?|规则[:：]?)\s*", "", t)
+    t = t.strip().strip("。.!！?？")
+    if "叫我老板" in t:
+        return "以后都叫我老板"
+    return t
+
+def _parse_prefs(raw: str) -> list[str]:
+    if not raw or raw.strip() == "无额外偏好":
+        return []
+    items: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            val = _normalize_preference(line[2:])
+        else:
+            val = _normalize_preference(line)
+        if val:
+            items.append(val)
+    return items
+
+def _compact_prefs(items: list[str], max_items: int = 50) -> list[str]:
+    seen = set()
+    out: list[str] = []
+    for it in items:
+        if it in seen:
+            continue
+        seen.add(it)
+        out.append(it)
+        if len(out) >= max_items:
+            break
+    return out
+
 def add_user_preference(preference: str) -> str:
     """添加用户的长期偏好（比如：以后都叫我老板）"""
     init_prompts()
-    prefs = PREFS_FILE.read_text(encoding="utf-8")
-    
-    if prefs.strip() == "无额外偏好":
-        prefs = ""
-        
-    new_prefs = f"{prefs}\n- {preference}".strip()
-    PREFS_FILE.write_text(new_prefs, encoding="utf-8")
-    
-    return f"已成功将指令“{preference}”永久保存至系统的长期偏好中。"
+    normalized = _normalize_preference(preference)
+    if not normalized:
+        return "未检测到可保存的长期偏好。"
+
+    raw = PREFS_FILE.read_text(encoding="utf-8")
+    items = _parse_prefs(raw)
+    existed = normalized in set(items)
+    items.append(normalized)
+    compacted = _compact_prefs(items)
+
+    if not compacted:
+        PREFS_FILE.write_text("无额外偏好", encoding="utf-8")
+    else:
+        PREFS_FILE.write_text("\n".join([f"- {it}" for it in compacted]), encoding="utf-8")
+
+    if existed:
+        return f"该长期指令已存在：“{normalized}”。"
+    return f"已成功将指令“{normalized}”永久保存至系统的长期偏好中。"
