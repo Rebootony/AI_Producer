@@ -1,7 +1,34 @@
 #!/bin/bash
+set -euo pipefail
+
+if [ -z "${AI_PRODUCER_MAC_BOOTSTRAPPED:-}" ]; then
+  export AI_PRODUCER_MAC_BOOTSTRAPPED=1
+  chmod +x "$0" 2>/dev/null || true
+  exec /bin/bash "$0" "$@"
+fi
 
 # 切换到脚本所在目录
 cd "$(dirname "$0")"
+ROOT_DIR="$(pwd)"
+
+MODE="${1:-all}"
+
+start_backend_foreground() {
+  cd "${ROOT_DIR}/backend"
+  if [ ! -d "venv" ]; then
+    python3 -m venv venv
+  fi
+  source venv/bin/activate
+  python3 -m pip install --upgrade pip
+  python3 -m pip install -r requirements.txt
+  python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
+}
+
+start_frontend_foreground() {
+  cd "${ROOT_DIR}/frontend"
+  npm install
+  npm run dev
+}
 
 echo "========================================"
 echo "   AI Producer - 一键启动脚本 (Mac)"
@@ -20,24 +47,51 @@ if ! command -v npm &> /dev/null; then
 fi
 
 echo ">>> 正在清理可能残留的进程..."
-lsof -ti:8000 | xargs kill -9 2>/dev/null
-lsof -ti:5173 | xargs kill -9 2>/dev/null
+PIDS_8000="$(lsof -ti:8000 2>/dev/null || true)"
+if [ -n "${PIDS_8000}" ]; then
+  kill -9 ${PIDS_8000} 2>/dev/null || true
+fi
+PIDS_5173="$(lsof -ti:5173 2>/dev/null || true)"
+if [ -n "${PIDS_5173}" ]; then
+  kill -9 ${PIDS_5173} 2>/dev/null || true
+fi
+
+if [ "${MODE}" = "--backend" ]; then
+  start_backend_foreground
+  exit 0
+fi
+
+if [ "${MODE}" = "--frontend" ]; then
+  start_frontend_foreground
+  exit 0
+fi
 
 echo ">>> [1/2] 正在准备后端服务..."
-cd backend
-python3 -m venv venv
+cd "${ROOT_DIR}/backend"
+if [ ! -d "venv" ]; then
+  python3 -m venv venv
+fi
 source venv/bin/activate
-pip install -r requirements.txt > /dev/null 2>&1
-python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 &
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+BACKEND_LOG="${TMPDIR:-/tmp}/ai_producer_backend_runtime.log"
+rm -f "${BACKEND_LOG}"
+python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 > "${BACKEND_LOG}" 2>&1 &
 BACKEND_PID=$!
-cd ..
+cd "${ROOT_DIR}"
+sleep 1
+if ! kill -0 ${BACKEND_PID} 2>/dev/null; then
+  echo "错误: 后端启动失败。下面是后端日志："
+  tail -n 200 "${BACKEND_LOG}" || true
+  exit 1
+fi
 
 echo ">>> [2/2] 正在准备前端服务 (可能会下载依赖，请耐心等待)..."
-cd frontend
-npm install > /dev/null 2>&1
+cd "${ROOT_DIR}/frontend"
+npm install
 npm run dev &
 FRONTEND_PID=$!
-cd ..
+cd "${ROOT_DIR}"
 
 echo ">>> 服务启动中，浏览器即将自动打开..."
 sleep 3
@@ -48,6 +102,5 @@ echo "服务运行中... 请不要关闭此终端窗口！"
 echo "退出服务请在此窗口按 [Ctrl+C]"
 echo "========================================"
 
-# 捕获退出信号，清理后台进程
 trap "echo -e '\n正在关闭服务...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit" INT TERM
 wait

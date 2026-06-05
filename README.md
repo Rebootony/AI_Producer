@@ -88,3 +88,22 @@
    npm run dev
    ```
    *服务将运行在 http://localhost:5173，在浏览器中打开此地址即可体验。*
+
+---
+
+## 一键启动脚本
+
+### Mac（双击启动）
+1. 第一次下载/克隆后，如果双击 `start_mac.command` 没反应或提示无权限，先在项目根目录执行一次：
+   ```bash
+   chmod +x start_mac.command
+   ```
+2. 推荐双击 `start_mac_double_click.command`：会分别打开两个终端窗口（后端/前端各一个），更适合小白辨认哪个在跑。
+3. 若你更希望一个窗口同时启动前后端，也可以双击 `start_mac.command`。
+4. 若被系统安全策略拦截：右键对应脚本 → 打开（Open）。
+
+### Mac（不依赖双击，强制运行）
+在项目根目录执行：
+```bash
+bash start_mac.command
+```
