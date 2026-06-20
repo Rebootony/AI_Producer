@@ -52,8 +52,9 @@ function App() {
       {/* Main Layout */}
       <main className="flex-1 flex overflow-hidden">
         <GlobalSidebar />
+        {view === 'dashboard' && <Dashboard />}
         {view === 'project_chat' && <ChatSidebar />}
-        {view === 'dashboard' ? <Dashboard /> : <Workspace />}
+        {view === 'project_dashboard' && <Workspace />}
       </main>
     </div>
   );

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from typing import Optional
 from database import engine, get_db
 import models
@@ -116,21 +116,36 @@ def create_thread(project_id: str, req: ThreadRequest, user_id: str, db: Session
     return {"id": new_thread.id, "name": new_thread.name}
 
 @app.get("/api/projects/{project_id}/threads")
-def get_threads(project_id: str, role: Optional[str] = None, db: Session = Depends(get_db)):
+def get_threads(project_id: str, role: Optional[str] = None, user_id: Optional[str] = None, db: Session = Depends(get_db)):
     # 为了简化，我们依然复用原来基于 messages 表推导 session 的逻辑，但也结合 ChatThread 表
     # 如果要完全重构，就直接从 ChatThread 表里查。
     # 这里我们返回所有的 thread 列表，并附加 unreadCount。
-    threads_db = db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id).all()
+    threads_q = db.query(models.ChatThread).filter(models.ChatThread.project_id == project_id)
+    if user_id:
+        threads_q = threads_q.filter(models.ChatThread.user_id == user_id)
+    threads_db = threads_q.all()
     threads_dict = {t.id: {"id": t.id, "name": t.name, "timestamp": ensure_tz(t.updated_at), "unreadCount": 0} for t in threads_db}
     
     # 默认存在一个 "default" session，为了兼容之前的逻辑
     if "default" not in threads_dict:
         threads_dict["default"] = {"id": "default", "name": "主频道", "timestamp": models.get_utc_8(), "unreadCount": 0}
 
-    messages = db.query(models.Message).filter(models.Message.project_id == project_id).all()
+    messages_q = db.query(models.Message).filter(models.Message.project_id == project_id)
+    if user_id:
+        messages_q = messages_q.filter(
+            or_(
+                models.Message.session_id == "default",
+                models.Message.sender_id == user_id
+            )
+        )
+    messages = messages_q.all()
     for m in messages:
         m_ts = ensure_tz(m.timestamp)
         if m.session_id not in threads_dict:
+            if m.session_id == "default":
+                continue
+            if user_id and m.sender_id != user_id:
+                continue
             # 如果是历史遗留的 session_id 没有在 thread 表里
             threads_dict[m.session_id] = {"id": m.session_id, "name": f"对话 {m.session_id.replace('session_', '')}", "timestamp": m_ts, "unreadCount": 0}
         else:
@@ -210,6 +225,53 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
         res.append({"id": m.id, "role": r, "content": m.content, "user_id": m.sender_id, "timestamp": ensure_tz(m.timestamp)})
         
     return {"messages": res}
+
+@app.get("/api/messages_global")
+def get_messages_global(role: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Message)
+    if role:
+        query = query.filter(
+            or_(
+                models.Message.target_role == None,
+                models.Message.target_role == role,
+                models.Message.sender_id == role
+            )
+        )
+    messages = query.order_by(models.Message.timestamp.asc()).all()
+
+    if role:
+        unread_messages = [m for m in messages if m.target_role == role and m.is_read == 0 and m.sender_id == "ai_producer"]
+        for m in unread_messages:
+            m.is_read = 1
+        if unread_messages:
+            db.commit()
+
+    res = []
+    for m in messages:
+        r = "ai"
+        if role and m.sender_id == role:
+            r = "user"
+        elif m.sender_id == "employee" and role == "boss":
+            r = "employee"
+        res.append({
+            "id": m.id,
+            "role": r,
+            "content": m.content,
+            "user_id": m.sender_id,
+            "timestamp": ensure_tz(m.timestamp),
+            "project_id": m.project_id
+        })
+    return {"messages": res}
+
+@app.get("/api/unread_counts")
+def get_unread_counts(role: str, db: Session = Depends(get_db)):
+    rows = db.query(models.Message.project_id, func.count(models.Message.id)).filter(
+        models.Message.sender_id == "ai_producer",
+        models.Message.target_role == role,
+        models.Message.is_read == 0
+    ).group_by(models.Message.project_id).all()
+    counts = {pid: int(cnt) for pid, cnt in rows}
+    return {"counts": counts}
 
 from ai_agent import chat_with_llm, get_config_snapshot
 

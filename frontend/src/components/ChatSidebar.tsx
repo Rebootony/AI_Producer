@@ -1,25 +1,39 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils';
-import { Send, Bot, User, Paperclip, Loader2, Plus, Trash2, List } from 'lucide-react';
+import { Send, Bot, User, Paperclip, Loader2 } from 'lucide-react';
 
 export function ChatSidebar() {
-  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject, currentSessionId, setCurrentSessionId, sessions, setSessions } = useStore();
+  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const currentSessionId = 'default';
 
   const fetchMessages = async () => {
-    const projectId = currentProjectId || 'p1';
     try {
-      const roleParam = currentUser ? `&role=${currentUser.role}` : '';
-      const res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}&t=${Date.now()}`, {
+      const params: string[] = [];
+      if (currentUser) params.push(`role=${encodeURIComponent(currentUser.role)}`);
+      params.push(`t=${Date.now()}`);
+      const qs = `?${params.join('&')}`;
+      let res = await fetch(`/api/messages_global${qs}`, {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0'
         }
       });
+      if (!res.ok) {
+        const projectId = currentProjectId || 'p1';
+        const roleParam = currentUser ? `&role=${currentUser.role}` : '';
+        res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}&t=${Date.now()}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
+      }
       if (res.ok) {
         const data = await res.json();
         const mapped = data.messages.map((m: any) => ({
@@ -48,7 +62,7 @@ export function ChatSidebar() {
 
   // 轮询自动刷新消息
   useEffect(() => {
-    if (!currentUser || !currentProjectId || !currentSessionId) return;
+    if (!currentUser) return;
     
     // 初始化时获取一次
     fetchMessages();
@@ -60,15 +74,6 @@ export function ChatSidebar() {
 
     return () => clearInterval(intervalId);
   }, [currentProjectId, currentUser, currentSessionId]);
-
-  // 当选中某个 session 时，本地乐观清除红点（后端会在 fetchMessages 时自动标记已读）
-  useEffect(() => {
-    if (currentSessionId && sessions.length > 0) {
-       setSessions(sessions.map(s => 
-          s.id === currentSessionId ? { ...s, unreadCount: 0 } : s
-       ));
-    }
-  }, [currentSessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -116,23 +121,8 @@ export function ChatSidebar() {
     }
   };
 
-  const deleteCurrentSession = async () => {
-    if (currentSessionId === 'default') {
-      alert('主频道不可删除');
-      return;
-    }
-    if (!confirm('确定要删除当前对话吗？')) return;
-    const projectId = currentProjectId || 'p1';
-    try {
-      await fetch(`/api/projects/${projectId}/threads/${currentSessionId}`, { method: 'DELETE' });
-      setCurrentSessionId('default');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   return (
-    <div className="flex flex-col h-full bg-zinc-50 border-r border-zinc-200 w-[400px] shrink-0 relative">
+    <div className="flex flex-col h-full bg-zinc-50 flex-1 relative">
       {/* Header */}
       <div className="p-4 border-b border-zinc-200 bg-white flex items-center justify-between relative">
         <div className="flex items-center space-x-3">
@@ -147,18 +137,7 @@ export function ChatSidebar() {
             </p>
           </div>
         </div>
-        <div className="flex space-x-2">
-          {currentSessionId !== 'default' && (
-            <button
-              type="button"
-              onClick={deleteCurrentSession}
-              className="p-2 text-red-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
-              title="删除对话"
-            >
-              <Trash2 size={18} />
-            </button>
-          )}
-        </div>
+        <div className="flex space-x-2"></div>
       </div>
 
       {/* Messages */}

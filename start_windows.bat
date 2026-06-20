@@ -44,7 +44,7 @@ pip --version >nul 2>nul || (
     exit /b 1
 )
 pip install -r requirements.txt
-start "AI Producer Backend" /MIN cmd /c "uvicorn main:app --host 127.0.0.1 --port 8000"
+start "AI Producer Backend" /MIN cmd /c "uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
 cd ..
 
 echo ^>^>^> [2/2] 正在准备前端服务 (可能会下载依赖，请耐心等待)...

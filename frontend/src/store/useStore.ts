@@ -129,7 +129,7 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   
   currentProjectId: null,
-  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project_dashboard', currentSessionId: null }),
+  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project_chat', currentSessionId: 'default' }),
   
   currentSessionId: null,
   setCurrentSessionId: (id) => set({ currentSessionId: id, view: 'project_chat' }),

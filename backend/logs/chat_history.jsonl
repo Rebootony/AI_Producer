@@ -105,3 +105,6 @@
 {"timestamp": "2026-06-05T16:26:40.963299", "project_id": "p1", "user_id": "boss", "user_message": "有哪些文件", "ai_response": "\n\n大老板，目前系统里有需求Brief和报价单，需要我转达给员工确认吗？", "tools_used": ["get_assets_list"]}
 {"timestamp": "2026-06-05T16:27:15.279968", "project_id": "p1", "user_id": "boss", "user_message": "报价单在哪", "ai_response": "\n\n大老板，报价单在系统里，文件名是“达梦英文宣传片报价(Excel)”，需要我转达给员工确认吗？", "tools_used": ["get_assets_list"]}
 {"timestamp": "2026-06-05T16:27:50.801613", "project_id": "p1", "user_id": "boss", "user_message": "下周的排期是什么？什么时候能看到初剪？", "ai_response": "\n\n大老板，目前项目在策划阶段，交付时间是4月15日。下周应该会进入拍摄阶段，初剪时间得等拍摄完才能定，您看需要我跟员工确认具体排期吗？", "tools_used": ["get_project_timeline"]}
+{"timestamp": "2026-06-06T09:50:49.293214", "project_id": "p1", "user_id": "boss", "user_message": "？", "ai_response": "老板，您是想问项目进度、预算还是其他啥？直接说就行，我这边随时能查。", "tools_used": []}
+{"timestamp": "2026-06-06T09:57:12.876429", "project_id": "p1", "user_id": "boss", "user_message": "帮我拉个会", "ai_response": "\n\n老板，已经让员工安排会议了，您需要我跟进其他啥不？", "tools_used": ["transfer_message"]}
+{"timestamp": "2026-06-06T10:49:15.477179", "project_id": "p1", "user_id": "boss", "user_message": "现在预算是多少", "ai_response": "\n\n老板，现在总预算30万，没问题。", "tools_used": ["get_project_overview"]}
