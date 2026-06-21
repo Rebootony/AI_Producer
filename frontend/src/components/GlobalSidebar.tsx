@@ -1,11 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore, Project } from '../store/useStore';
 import { Video, LayoutDashboard, Briefcase, Plus } from 'lucide-react';
 import { cn } from '../utils';
+import { NewProjectModal } from './NewProjectModal';
 
 export function GlobalSidebar() {
-  const { view, setView, projects, currentProjectId, setCurrentProject, currentUser } = useStore();
+  const { view, setView, projects, currentProjectId, setCurrentProject, setProjects, currentUser } = useStore();
   const [unreadByProject, setUnreadByProject] = useState<Record<string, number>>({});
+  const [showNewProject, setShowNewProject] = useState(false);
+
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch(`/api/projects?t=${Date.now()}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const mapped: Project[] = (data.projects || []).map((p: any) => ({
+        id: p.id, name: p.name, client: p.client, industry: p.industry,
+        budget: p.client_price || 0, usedBudget: 0, days: 35,
+        deliveryDate: p.delivery_date || '—',
+        status: p.status === 'completed' ? 'completed' : p.status === 'planning' ? 'planning' : 'in_progress',
+        health: 'good',
+      }));
+      if (mapped.length) setProjects(mapped);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    if (currentUser) fetchProjects();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
   const navItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: '大盘' },
@@ -130,7 +153,8 @@ export function GlobalSidebar() {
             );
           })}
           
-          <button 
+          <button
+            onClick={() => setShowNewProject(true)}
             className="w-12 h-12 rounded-2xl flex items-center justify-center text-zinc-500 bg-zinc-800/50 hover:bg-zinc-800 hover:text-zinc-300 transition-all border border-dashed border-zinc-700 hover:border-zinc-500 mt-2"
             title="新建项目"
           >
@@ -139,7 +163,7 @@ export function GlobalSidebar() {
         </div>
 
         <div className="mt-6 shrink-0 relative group">
-          <div 
+          <div
             className="w-10 h-10 rounded-full border-2 border-zinc-700 overflow-hidden cursor-pointer hover:border-zinc-500 transition-colors"
             onClick={() => useStore.getState().logout()}
             title="点击退出登录"
@@ -149,6 +173,11 @@ export function GlobalSidebar() {
         </div>
       </div>
 
+      <NewProjectModal
+        open={showNewProject}
+        onClose={() => setShowNewProject(false)}
+        onCreated={async (id) => { await fetchProjects(); setShowNewProject(false); setCurrentProject(id); }}
+      />
     </div>
   );
 }

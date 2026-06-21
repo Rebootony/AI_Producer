@@ -1,9 +1,14 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
+from pathlib import Path
+from urllib.parse import quote as _urlquote
+import time as _time
+import re as _re
 import uvicorn
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text
 from typing import Optional
 from database import engine, get_db
 import models
@@ -31,8 +36,12 @@ def ensure_tz(dt):
         return dt.replace(tzinfo=timezone(timedelta(hours=8)))
     return dt
 
+from datetime import date as _date
+
 # 初始化默认数据
 def init_db(db: Session):
+    # 演示用：把交付日锚定在"今天 + 16 天"，让排期始终呈现"进行中"的活态（而非全部已完成）
+    demo_delivery = (_date.today() + timedelta(days=16)).strftime("%Y-%m-%d")
     if not db.query(models.User).first():
         boss = models.User(id="boss", role="boss", name="创始人/老板")
         employee = models.User(id="employee", role="employee", name="执行团队/张导")
@@ -42,9 +51,18 @@ def init_db(db: Session):
     project = db.query(models.Project).filter(models.Project.id == "p1").first()
     if not project:
         project = models.Project(
-            id="p1", name="达梦宣传片", status="planning", budget=300000.0,
+            id="p1", name="达梦英文宣传片", status="planning", budget=0.0,
             client="武汉达梦数据库股份有限公司", industry="IT-基础软件",
-            goal="品牌升级与营销传播", delivery_date="2026-04-15"
+            goal="品牌升级与营销传播：传递达梦品牌全球定位，呈现技术价值与行业影响力",
+            delivery_date=demo_delivery,
+            film_type="英文宣传片", duration_minutes=2, difficulty="中", shoot_days=3,
+            margin_rate=0.25, tax_rate=0.01, generated=0,
+            brief_text=(
+                "客户：武汉达梦数据库股份有限公司（国企，IT-基础软件）。预算 20-30 万。交付：见排期表。"
+                "核心目标：清晰传递达梦品牌的全球定位（数据产品&解决方案提供商），呈现技术价值与行业影响力。"
+                "内容：兼具技术专业性与科技感，含品牌立意、展现身份与实力、技术如何改变现实、升华品牌价值。"
+                "应用场景：发布会、展会、拜访客户、自媒体平台。影片：英文宣传片，约 2 分钟，拍摄 3 天。"
+            ),
         )
         db.add(project)
         db.commit() # Commit to get project ID
@@ -70,12 +88,42 @@ def init_db(db: Session):
             models.Asset(project_id="p1", name="达梦英文宣传片需求Brief", asset_type="PDF"),
             models.Asset(project_id="p1", name="达梦英文宣传片报价", asset_type="Excel"),
         ])
-        
+
         db.commit()
+
+    # 第二个项目：泰康之家·海琴府（用真实成本单反推演示；完整 Brief 待补）
+    p2 = db.query(models.Project).filter(models.Project.id == "p2").first()
+    if not p2:
+        p2 = models.Project(
+            id="p2", name="泰康之家·海琴府", status="planning", budget=0.0,
+            client="泰康之家·海琴府", industry="高端康养地产",
+            goal="呈现高端康养社区的品质生活与品牌温度",
+            delivery_date=(_date.today() + timedelta(days=24)).strftime("%Y-%m-%d"),
+            film_type="品牌宣传片", duration_minutes=6, difficulty="中", shoot_days=3,
+            margin_rate=0.25, tax_rate=0.01, generated=0,
+            brief_text=("【占位 Brief】泰康之家·海琴府 高端康养社区品牌宣传片，约 6 分钟，拍摄 3 天。"
+                        "注：完整客户 Brief 与商务沟通记录待成永强提供，当前先用真实成本单反推做演示。"),
+        )
+        db.add(p2)
+        db.commit()
+        db.add(models.Asset(project_id="p2", name="泰康-项目费用(成本单)", asset_type="Excel"))
+        db.commit()
+
+def _migrate():
+    """对已存在的库做轻量迁移（SQLite ADD COLUMN，不丢数据）。"""
+    with engine.connect() as conn:
+        for stmt in ["ALTER TABLE assets ADD COLUMN file_path VARCHAR",
+                     "ALTER TABLE assets ADD COLUMN kind VARCHAR DEFAULT 'upload'"]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass
 
 # 在启动时初始化数据
 @app.on_event("startup")
 def on_startup():
+    _migrate()
     db = next(get_db())
     init_db(db)
 
@@ -96,11 +144,70 @@ class RelayRequest(BaseModel):
 def read_root():
     return {"status": "ok", "message": "AI Producer Backend is running."}
 
+class CreateProjectRequest(BaseModel):
+    name: str
+    client: str = "未知客户"
+    industry: str = "未知行业"
+    goal: str = "品牌宣传"
+    delivery_date: str = ""
+    film_type: str = "宣传片"
+    duration_minutes: float = 5
+    shoot_days: int = 2
+    brief_text: str = ""
+
+@app.get("/api/projects")
+def list_projects(db: Session = Depends(get_db)):
+    rows = db.query(models.Project).all()
+    return {"projects": [{
+        "id": p.id, "name": p.name, "client": p.client, "industry": p.industry,
+        "delivery_date": p.delivery_date, "generated": bool(p.generated),
+        "client_price": p.client_price, "status": p.status,
+    } for p in rows]}
+
+@app.post("/api/projects")
+def create_project(req: CreateProjectRequest, db: Session = Depends(get_db)):
+    existing = {p.id for p in db.query(models.Project).all()}
+    n = 1
+    while f"p{n}" in existing:
+        n += 1
+    pid = f"p{n}"
+    delivery = req.delivery_date or (_date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
+    project = models.Project(
+        id=pid, name=req.name, client=req.client, industry=req.industry, goal=req.goal,
+        delivery_date=delivery, film_type=req.film_type, duration_minutes=req.duration_minutes,
+        shoot_days=req.shoot_days, margin_rate=0.25, tax_rate=0.01, generated=0,
+        status="planning", budget=0.0, brief_text=req.brief_text or "",
+    )
+    db.add(project)
+    db.commit()
+    return {"status": "ok", "id": pid, "name": project.name}
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    for M in (models.QuoteItem, models.ScheduleItem, models.Message, models.Asset,
+              models.ChatThread, models.BudgetBreakdown, models.Crew):
+        db.query(M).filter(M.project_id == project_id).delete()
+    db.delete(project)
+    db.commit()
+    return {"status": "ok"}
+
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str, db: Session = Depends(get_db)):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
-        return {"id": project.id, "name": project.name, "status": project.status, "budget": project.budget}
+        return {
+            "id": project.id, "name": project.name, "status": project.status,
+            "budget": project.budget, "client": project.client, "industry": project.industry,
+            "goal": project.goal, "delivery_date": project.delivery_date,
+            "film_type": project.film_type, "duration_minutes": project.duration_minutes,
+            "difficulty": project.difficulty, "shoot_days": project.shoot_days,
+            "cost_total": project.cost_total, "tax_rate": project.tax_rate,
+            "margin_rate": project.margin_rate, "client_price": project.client_price,
+            "brief_text": project.brief_text, "generated": bool(project.generated),
+        }
     raise HTTPException(status_code=404, detail="Project not found")
 
 class ThreadRequest(BaseModel):
@@ -226,6 +333,16 @@ def get_messages(project_id: str, session_id: str = "default", role: Optional[st
         
     return {"messages": res}
 
+@app.delete("/api/messages/{project_id}")
+def clear_messages(project_id: str, session_id: str = "default", db: Session = Depends(get_db)):
+    """清空某项目某会话的对话记录（仅在用户主动点击时调用）。"""
+    db.query(models.Message).filter(
+        models.Message.project_id == project_id,
+        models.Message.session_id == session_id
+    ).delete()
+    db.commit()
+    return {"status": "ok"}
+
 @app.get("/api/messages_global")
 def get_messages_global(role: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Message)
@@ -273,7 +390,8 @@ def get_unread_counts(role: str, db: Session = Depends(get_db)):
     counts = {pid: int(cnt) for pid, cnt in rows}
     return {"counts": counts}
 
-from ai_agent import chat_with_llm, get_config_snapshot
+from ai_agent import chat_with_llm, get_config_snapshot, extract_brief_params
+import pricing_engine
 
 @app.post("/api/chat")
 def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
@@ -302,8 +420,9 @@ def chat_with_ai(req: ChatRequest, db: Session = Depends(get_db)):
     # 在 ai_agent.py 中，如果走的是工具 report_to_boss，其实 reply 是 "好的，已执行操作。"
     # 但如果由于某种原因 reply 被大模型生成了包含 "老板" 的话语，且当前是 employee，我们直接替换。
     if reply:
-        if req.role == "employee" and ("老板" in reply or "汇报" in reply):
-            # 如果大模型出现幻觉，把该发给老板的话当成了普通回复返回了，强制替换
+        # 仅当回复明显是"对老板说的话"误发给员工时才拦截（避免误伤正常含"老板"二字的内容，如超支需走专项审批）
+        _r = reply.strip()
+        if req.role == "employee" and (_r.startswith("老板") or "向老板汇报" in _r or "跟老板说" in _r or "已向老板" in _r):
             reply = "收到，情况我已了解，继续推进。"
             
         ai_msg = models.Message(project_id=req.project_id, session_id=req.session_id, sender_id="ai_producer", content=reply, target_role=req.role)
@@ -339,6 +458,216 @@ def relay_to_role(req: RelayRequest, db: Session = Depends(get_db)):
 
     db.commit()
     return {"status": "ok"}
+
+import quote_service
+
+class GenerateRequest(BaseModel):
+    brief_text: Optional[str] = None
+    business_notes: Optional[str] = None
+
+class MarginRequest(BaseModel):
+    margin_rate: float
+
+class QuoteItemUpdate(BaseModel):
+    unit_price: Optional[float] = None
+    qty_people: Optional[float] = None
+    qty_days: Optional[float] = None
+
+@app.post("/api/projects/{project_id}/generate")
+def generate_project(project_id: str, req: GenerateRequest, db: Session = Depends(get_db)):
+    """从 Brief 一键生成报价 + 排期（确定性引擎算钱）。"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if req.brief_text:
+        project.brief_text = req.brief_text
+        db.commit()
+    # 新项目（无内置档案）且有 Brief：让大模型抽参数，使报价随 Brief 变化
+    params = None
+    if project.brief_text and project_id not in pricing_engine.PROJECT_PROFILES:
+        params = extract_brief_params(project.brief_text)
+    totals = quote_service.generate_for_project(db, project_id, dynamic_params=params)
+    return {
+        "status": "ok",
+        "totals": totals,
+        "params": params,
+        "quote": quote_service.serialize_quote(db, project_id),
+        "schedule": quote_service.serialize_schedule(db, project_id),
+    }
+
+@app.get("/api/projects/{project_id}/quote")
+def get_quote(project_id: str, db: Session = Depends(get_db)):
+    return quote_service.serialize_quote(db, project_id)
+
+@app.get("/api/projects/{project_id}/schedule")
+def get_schedule(project_id: str, db: Session = Depends(get_db)):
+    return quote_service.serialize_schedule(db, project_id)
+
+@app.get("/api/projects/{project_id}/assets")
+def get_assets(project_id: str, db: Session = Depends(get_db)):
+    rows = db.query(models.Asset).filter(models.Asset.project_id == project_id).all()
+    return {"assets": [{
+        "id": a.id, "name": a.name, "type": (a.asset_type or "FILE"),
+        "kind": (a.kind or "upload"), "downloadable": bool(a.file_path),
+    } for a in rows]}
+
+UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
+
+def _save_upload(project_id: str, filename: str, raw: bytes) -> str:
+    safe = _re.sub(r"[^\w.\-一-鿿]", "_", filename or "file")
+    d = UPLOAD_DIR / project_id
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{int(_time.time() * 1000)}_{safe}"
+    p.write_bytes(raw)
+    return str(p)
+
+def _xlsx_response(data: bytes, filename: str) -> Response:
+    dispo = f"attachment; filename*=UTF-8''{_urlquote(filename)}"
+    return Response(content=data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": dispo})
+
+@app.get("/api/projects/{project_id}/quote.xlsx")
+def export_quote(project_id: str, version: str = "client", db: Session = Depends(get_db)):
+    import excel_export
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    data = excel_export.build_quote_xlsx(db, project_id, version=version)
+    tag = "内部版" if version == "internal" else "客户版"
+    return _xlsx_response(data, f"{project.name}-报价单({tag}).xlsx")
+
+@app.get("/api/projects/{project_id}/schedule.xlsx")
+def export_schedule(project_id: str, db: Session = Depends(get_db)):
+    import excel_export
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    data = excel_export.build_schedule_xlsx(db, project_id)
+    return _xlsx_response(data, f"{project.name}-执行排期.xlsx")
+
+@app.post("/api/projects/{project_id}/assets/upload")
+async def upload_asset(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    raw = await file.read()
+    path = _save_upload(project_id, file.filename, raw)
+    ext = (file.filename.rsplit(".", 1)[-1].upper() if "." in (file.filename or "") else "FILE")
+    a = models.Asset(project_id=project_id, name=file.filename or "文件", asset_type=ext,
+                     file_path=path, kind="upload")
+    db.add(a)
+    db.commit()
+    return {"status": "ok", "id": a.id, "name": a.name}
+
+@app.get("/api/projects/{project_id}/assets/{asset_id}/download")
+def download_asset(project_id: str, asset_id: int, db: Session = Depends(get_db)):
+    a = db.query(models.Asset).filter(models.Asset.id == asset_id,
+                                      models.Asset.project_id == project_id).first()
+    if not a or not a.file_path or not Path(a.file_path).exists():
+        raise HTTPException(status_code=404, detail="文件不存在或未存储原件")
+    dispo = f"attachment; filename*=UTF-8''{_urlquote(a.name)}"
+    return FileResponse(a.file_path, headers={"Content-Disposition": dispo})
+
+@app.put("/api/projects/{project_id}/margin")
+def update_margin(project_id: str, req: MarginRequest, db: Session = Depends(get_db)):
+    totals = quote_service.set_margin(db, project_id, req.margin_rate)
+    return {"status": "ok", "totals": totals}
+
+@app.put("/api/projects/{project_id}/quote/items/{item_id}")
+def update_quote_item_api(project_id: str, item_id: int, req: QuoteItemUpdate, db: Session = Depends(get_db)):
+    item = db.query(models.QuoteItem).filter(
+        models.QuoteItem.id == item_id, models.QuoteItem.project_id == project_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Quote item not found")
+    res = quote_service.update_quote_item(
+        db, project_id, item.item_name,
+        unit_price=req.unit_price, qty_people=req.qty_people, qty_days=req.qty_days
+    )
+    return {"status": "ok", "result": res, "quote": quote_service.serialize_quote(db, project_id)}
+
+class BriefRequest(BaseModel):
+    brief_text: str
+
+def _extract_brief_text(raw: bytes, filename: str) -> str:
+    name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        try:
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            return "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+        except Exception as e:
+            return f"(PDF 解析失败：{e})"
+    for enc in ("utf-8", "gbk", "latin-1"):
+        try:
+            return raw.decode(enc).strip()
+        except Exception:
+            continue
+    return ""
+
+def _resync_kanban_after_brief(db: Session, project: "models.Project") -> bool:
+    """Brief 变更后保持看板一致：若已生成过报价，则按新 Brief 重新生成（保持一致性）。
+    未生成的项目不动（等用户点"生成"）。"""
+    if not project.generated:
+        return False
+    params = extract_brief_params(project.brief_text)
+    quote_service.generate_for_project(db, project.id, dynamic_params=params, force_dynamic=True)
+    return True
+
+@app.put("/api/projects/{project_id}/brief")
+def set_brief(project_id: str, req: BriefRequest, db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.brief_text = req.brief_text
+    db.commit()
+    regenerated = _resync_kanban_after_brief(db, project)
+    return {"status": "ok", "brief_text": project.brief_text, "regenerated": regenerated}
+
+@app.post("/api/projects/{project_id}/brief/upload")
+async def upload_brief(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    raw = await file.read()
+    text = _extract_brief_text(raw, file.filename)
+    if text:
+        project.brief_text = text
+    path = _save_upload(project_id, file.filename, raw)
+    ext = (file.filename.rsplit(".", 1)[-1].upper() if "." in (file.filename or "") else "FILE")
+    db.add(models.Asset(project_id=project_id, name=file.filename or "Brief", asset_type=ext,
+                        file_path=path, kind="upload"))
+    db.commit()
+    regenerated = _resync_kanban_after_brief(db, project)
+    return {"status": "ok", "filename": file.filename, "brief_text": project.brief_text, "regenerated": regenerated}
+
+@app.get("/api/dashboard")
+def dashboard(db: Session = Depends(get_db)):
+    projects = db.query(models.Project).all()
+    items = []
+    total_price = 0.0
+    total_cost = 0.0
+    risk = 0
+    for p in projects:
+        low_margin = bool(p.generated and (p.margin_rate or 0) < 0.15)
+        if low_margin:
+            risk += 1
+        items.append({
+            "id": p.id, "name": p.name, "client": p.client, "industry": p.industry,
+            "delivery_date": p.delivery_date, "generated": bool(p.generated),
+            "client_price": p.client_price, "cost_total": p.cost_total,
+            "margin_rate": p.margin_rate, "shoot_days": p.shoot_days,
+            "health": "warning" if low_margin else ("good" if p.generated else "planning"),
+        })
+        total_price += p.client_price or 0
+        total_cost += p.cost_total or 0
+    return {
+        "projects": items, "count": len(projects),
+        "total_client_price": total_price, "total_cost": total_cost,
+        "total_profit": total_price - total_cost, "risk_count": risk,
+    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

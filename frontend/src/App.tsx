@@ -9,8 +9,9 @@ import { Bell, Settings } from 'lucide-react';
 import { useStore } from './store/useStore';
 
 function App() {
-  const { view, currentProjectId, projects, currentUser } = useStore();
+  const { view, currentProjectId, projects, currentUser, setView } = useStore();
   const currentProject = projects.find(p => p.id === currentProjectId);
+  const inProject = (view === 'project_dashboard' || view === 'project_chat') && !!currentProject;
 
   if (!currentUser) {
     return <Login />;
@@ -29,11 +30,26 @@ function App() {
           <div className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'dashboard' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-zinc-400'}`}>
             大盘总览
           </div>
-          {(view === 'project_dashboard' || view === 'project_chat') && currentProject && (
+          {inProject && (
             <>
               <span className="text-zinc-600">/</span>
               <div className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-md text-sm font-medium">
-                {currentProject.name}
+                {currentProject!.name}
+              </div>
+              {/* 看板 / 对话 切换 */}
+              <div className="ml-3 flex items-center bg-zinc-800 rounded-lg p-0.5">
+                <button
+                  onClick={() => setView('project_dashboard')}
+                  className={`px-3 py-1 rounded-md text-sm transition-colors ${view === 'project_dashboard' ? 'bg-blue-600 text-white font-medium' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  看板
+                </button>
+                <button
+                  onClick={() => setView('project_chat')}
+                  className={`px-3 py-1 rounded-md text-sm transition-colors ${view === 'project_chat' ? 'bg-blue-600 text-white font-medium' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  对话
+                </button>
               </div>
             </>
           )}

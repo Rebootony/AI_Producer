@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 from openai import OpenAI
 from sqlalchemy.orm import Session
@@ -8,18 +9,28 @@ import models
 
 from prompt_manager import get_full_system_prompt, add_user_preference
 from logger import log_interaction
+import quote_service
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
-BASE_URL = os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1")
-API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
-MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B")
+BASE_URL = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+# 兼容多种供应商的 key 命名：通用 LLM_API_KEY > OpenRouter > 硅基流动
+API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("SILICONFLOW_API_KEY", "")
+MODEL_NAME = os.getenv("LLM_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 SUPPORTS_FUNCTIONS = os.getenv("LLM_SUPPORTS_FUNCTIONS", "false").lower() == "true"
 
 if not API_KEY and "localhost" in BASE_URL:
     API_KEY = "ollama"
 
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+# OpenRouter 推荐(可选)的排行 headers
+_default_headers = None
+if "openrouter" in BASE_URL:
+    _default_headers = {
+        "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "http://localhost:5173"),
+        "X-Title": os.getenv("OPENROUTER_APP_NAME", "AI Producer"),
+    }
+
+client = OpenAI(api_key=API_KEY, base_url=BASE_URL, default_headers=_default_headers)
 
 tools = [
     {"type": "function", "function": {"name": "get_project_overview", "description": "获取客户信息、核心目标、制作周期与总预算", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
@@ -38,7 +49,12 @@ tools = [
     {"type": "function", "function": {"name": "urge_employee_delivery", "description": "催促员工尽快完成并交付当前产出物", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "provide_client_feedback", "description": "向员工转达客户的修改意见或反馈", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "feedback": {"type": "string"}}, "required": ["project_id", "feedback"]}}},
     {"type": "function", "function": {"name": "schedule_internal_meeting", "description": "通知员工安排内部开会或堪景等日程", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "meeting_info": {"type": "string"}}, "required": ["project_id", "meeting_info"]}}},
-    {"type": "function", "function": {"name": "report_to_boss", "description": "员工回复后，AI调用此工具向后台/老板记录情况（附带员工原话在双引号内）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "report_content": {"type": "string", "description": "向后台记录的内容，需将员工原话放在双引号内"}}, "required": ["project_id", "report_content"]}}}
+    {"type": "function", "function": {"name": "report_to_boss", "description": "员工回复后，AI调用此工具向后台/老板记录情况（附带员工原话在双引号内）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "report_content": {"type": "string", "description": "向后台记录的内容，需将员工原话放在双引号内"}}, "required": ["project_id", "report_content"]}}},
+    {"type": "function", "function": {"name": "generate_quote_and_schedule", "description": "根据项目 Brief 一键生成（或重新生成）报价单与执行排期。当老板说'生成报价/出个报价/排个期/按brief算一下'时调用。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "update_quote_item", "description": "修改报价单里某一项的单价/人数/天数并自动重算。例如老板说'导演按5000算'(改unit_price)、'摄影加一个人'(改qty_people)、'拍摄加一天'(改qty_days)。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string", "description": "报价项名称，如 导演/摄影/剪辑"}, "unit_price": {"type": "number"}, "qty_people": {"type": "number"}, "qty_days": {"type": "number"}}, "required": ["project_id", "item_name"]}}},
+    {"type": "function", "function": {"name": "set_margin_rate", "description": "调整项目利润率(毛利率)并重算实收报价。例如老板说'利润率提到30%'就传 0.3。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "margin_rate": {"type": "number", "description": "小数，如 0.25 表示25%"}}, "required": ["project_id", "margin_rate"]}}},
+    {"type": "function", "function": {"name": "request_overrun", "description": "员工/执行层申请追加预算或报销超支时调用。AI作为流程执行者：≤2000元可自行批准，超出则打回让其找老板。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}, "amount": {"type": "number"}, "reason": {"type": "string"}}, "required": ["project_id", "amount", "reason"]}}},
+    {"type": "function", "function": {"name": "set_shoot_days", "description": "调整拍摄天数。会联动更新 B 段拍摄费用并重新倒推排期。例如老板说'拍摄加一天'或'改成拍4天'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "days"]}}}
 ]
 
 def execute_function_call(name: str, args: dict, session_id: str, db: Session):
@@ -50,9 +66,14 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
     if name == "get_project_overview":
         return f"客户: {project.client}, 行业: {project.industry}, 目标: {project.goal}, 交付: {project.delivery_date}, 总预算: {project.budget}"
     elif name == "get_budget_breakdown":
-        items = db.query(models.BudgetBreakdown).filter(models.BudgetBreakdown.project_id == project.id).all()
-        res = ", ".join([f"{i.category}-{i.item_name}: {i.amount}" for i in items])
-        return f"预算明细: {res if res else '无'}"
+        items = db.query(models.QuoteItem).filter(models.QuoteItem.project_id == project.id).order_by(models.QuoteItem.sort_order).all()
+        if not items:
+            return "目前还没有生成报价单。可以让我先按 Brief 生成报价。"
+        subs = {}
+        for i in items:
+            subs[i.phase_name] = subs.get(i.phase_name, 0) + i.amount
+        seg = ", ".join([f"{k} {v:.0f}元" for k, v in subs.items()])
+        return f"报价分段：{seg}。成本核算 {project.cost_total:.0f}，利润率 {project.margin_rate*100:.0f}%，实收 {project.client_price:.0f}。"
     elif name == "modify_budget":
         project.budget += args["amount"]
         db.commit()
@@ -124,7 +145,34 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         db.add(models.Message(project_id=project.id, session_id=work_session_id, sender_id="ai_producer", content=content, target_role="boss"))
         db.commit()
         return "情况已记录。"
-    
+    elif name == "generate_quote_and_schedule":
+        totals = quote_service.generate_for_project(db, project.id)
+        return (f"已按 Brief 生成报价和排期。成本核算 {totals['cost_total']:.0f} 元，"
+                f"利润率 {project.margin_rate*100:.0f}%，对客户实收 {totals['client_price']:.0f} 元，"
+                f"拍摄 {project.shoot_days} 天，看板已更新。")
+    elif name == "update_quote_item":
+        res = quote_service.update_quote_item(
+            db, project.id, args.get("item_name"),
+            unit_price=args.get("unit_price"), qty_people=args.get("qty_people"), qty_days=args.get("qty_days"))
+        if not res.get("ok"):
+            return res.get("msg", "改不了这一项")
+        return (f"已把「{res['item']}」改好，该项现在 {res['amount']:.0f} 元，"
+                f"成本核算 {res['cost_total']:.0f}，实收 {res['client_price']:.0f}。")
+    elif name == "set_margin_rate":
+        totals = quote_service.set_margin(db, project.id, args.get("margin_rate", 0.25))
+        return (f"利润率已调到 {project.margin_rate*100:.0f}%，成本 {totals['cost_total']:.0f} 不变，"
+                f"对客户实收变为 {totals['client_price']:.0f} 元。")
+    elif name == "request_overrun":
+        res = quote_service.request_overrun(db, project.id, args.get("item_name", "杂项"),
+                                            args.get("amount", 0), args.get("reason", ""))
+        return res.get("msg", "")
+    elif name == "set_shoot_days":
+        res = quote_service.set_shoot_days(db, project.id, args.get("days", 1))
+        if not res.get("ok"):
+            return res.get("msg", "改不了拍摄天数")
+        return (f"拍摄天数从 {res['old']} 天改成 {res['days']} 天，B 段费用和排期都已重算："
+                f"成本核算 {res['cost_total']:.0f}，实收 {res['client_price']:.0f}。")
+
     return "未知函数"
 
 from typing import Optional
@@ -141,6 +189,108 @@ def parse_budget_target(message: str) -> Optional[float]:
         return float(digits)
     return None
 
+# —— 规则命令层（确定性，不依赖大模型；保证演示在 API key 不可用时也能跑通报价/排期）——
+KNOWN_ITEMS = ["摄影灯光器材", "摄影助理", "灯光助理", "服化助理", "道具助理", "版权音乐", "版权素材",
+               "设备器材", "导演", "制片", "摄影", "焦点", "摄助", "灯光师", "美术", "道具",
+               "录音师", "录音", "演员", "服化师", "服化", "剪辑", "包装", "调色", "配乐", "配音",
+               "场地", "餐食", "设备车"]
+CN_NUM = {"两": 2, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+def _num(text: str):
+    t = text.replace(",", "").replace("，", "")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*万", t)
+    if m:
+        return float(m.group(1)) * 10000
+    m = re.search(r"(\d+(?:\.\d+)?)", t)
+    if m:
+        return float(m.group(1))
+    for ch, v in CN_NUM.items():
+        if ch in t:
+            return float(v)
+    return None
+
+def try_rule_command(user_message: str, user_id: str, project_id: str, db: Session):
+    """命中确定性命令则直接执行并返回回复，否则返回 None（交给大模型）。"""
+    text = (user_message or "").strip()
+    if not text:
+        return None
+    is_employee = (user_id == "employee")
+
+    # 超支/报销：员工的预算交互入口（≤2000 自批，超出打回），老板也可用
+    if any(k in text for k in ["超支", "报销", "追加预算", "多花", "超了预算", "加预算"]):
+        amt = _num(text)
+        if amt is not None:
+            return execute_function_call("request_overrun",
+                                         {"project_id": project_id, "item_name": "杂项", "amount": amt, "reason": text},
+                                         "default", db)
+
+    # —— 权限：员工只读排期/进度/总览，预算与报价一律不接 ——
+    if is_employee:
+        if any(k in text for k in ["排期", "进度", "到哪一步", "什么时候交", "几号交", "交付时间"]):
+            return execute_function_call("get_project_timeline", {"project_id": project_id}, "default", db)
+        if any(k in text for k in ["总览", "基本情况", "项目情况", "项目概况"]):
+            return execute_function_call("get_project_overview", {"project_id": project_id}, "default", db)
+        if any(k in text for k in ["报价", "预算", "利润", "毛利", "成本", "多少钱", "生成", "单价", "调价"]) \
+                or any(it in text for it in KNOWN_ITEMS):
+            return "预算和报价这块你不用管，盯好自己的进度和交付就行。"
+        return None  # 其它（闲聊/汇报）交给大模型
+
+    # —— 老板：完整命令 ——
+    # 1) 生成报价 + 排期
+    if any(k in text for k in ["生成报价", "出报价", "出个报价", "生成排期", "排个期", "按brief", "按 brief",
+                               "一键生成", "算个报价", "报个价", "生成方案", "生成预算", "重新生成"]):
+        return execute_function_call("generate_quote_and_schedule", {"project_id": project_id}, "default", db)
+    # 2) 利润率
+    if "利润率" in text or "毛利" in text:
+        mm = re.search(r"(\d+(?:\.\d+)?)\s*%", text) or re.search(r"(\d+(?:\.\d+)?)\s*个?点", text)
+        num = None
+        if mm:
+            num = float(mm.group(1)) / 100
+        else:
+            v = _num(text)
+            if v is not None:
+                num = v / 100 if v > 1 else v
+        if num is not None:
+            return execute_function_call("set_margin_rate", {"project_id": project_id, "margin_rate": num}, "default", db)
+    # 3) 超支 / 报销
+    if any(k in text for k in ["超支", "报销", "追加预算", "多花", "超了预算", "加预算"]):
+        amt = _num(text)
+        if amt is not None:
+            return execute_function_call("request_overrun",
+                                         {"project_id": project_id, "item_name": "杂项", "amount": amt, "reason": text},
+                                         "default", db)
+    # 4) 拍摄天数（联动 B 段费用 + 排期）
+    if "拍摄" in text and "天" in text:
+        proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+        cur = proj.shoot_days if proj else 3
+        if any(k in text for k in ["加", "多", "增"]):
+            return execute_function_call("set_shoot_days", {"project_id": project_id, "days": int(cur + (_num(text) or 1))}, "default", db)
+        if any(k in text for k in ["减", "少"]):
+            return execute_function_call("set_shoot_days", {"project_id": project_id, "days": int(cur - (_num(text) or 1))}, "default", db)
+        n = _num(text)
+        if n is not None:
+            return execute_function_call("set_shoot_days", {"project_id": project_id, "days": int(n)}, "default", db)
+    # 5) 某报价项单价
+    for item in KNOWN_ITEMS:
+        if item in text and any(k in text for k in ["单价", "一天", "每天", "按", "改成", "调到", "调成", "改为", "调整到"]):
+            num = _num(text)
+            if num is not None:
+                return execute_function_call("update_quote_item",
+                                             {"project_id": project_id, "item_name": item, "unit_price": num},
+                                             "default", db)
+            break
+    # 6) 只读查询（避免 key 失效时报错；但放过明显的传话意图，留给大模型）
+    relay_intent = any(k in text for k in ["张导", "员工", "问下", "问问", "催", "转达", "告诉", "通知", "让他", "让她", "汇报"])
+    if not relay_intent:
+        if any(k in text for k in ["报价", "预算", "多少钱", "成本", "花多少"]):
+            return execute_function_call("get_budget_breakdown", {"project_id": project_id}, "default", db)
+        if any(k in text for k in ["排期", "进度", "到哪一步", "什么时候交", "几号交", "交付时间"]):
+            return execute_function_call("get_project_timeline", {"project_id": project_id}, "default", db)
+        if any(k in text for k in ["总览", "基本情况", "项目情况", "项目概况"]):
+            return execute_function_call("get_project_overview", {"project_id": project_id}, "default", db)
+    return None
+
+
 def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: str, db: Session) -> str:
     is_rule = False
     if ("以后都叫我" in user_message or "以后请叫我" in user_message or "请记住规则" in user_message) and not any(k in user_message for k in ["看看", "落后", "进度"]):
@@ -155,6 +305,12 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             content = f"好的，{content}"
             log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
             return content
+
+    # —— 规则命令层：命中报价/排期/利润率/超支等确定性指令则直接执行（不依赖大模型）——
+    rb = try_rule_command(user_message, user_id, project_id, db)
+    if rb is not None:
+        log_interaction(project_id, user_id, user_message, rb, ["rule_command"])
+        return rb
 
     if not SUPPORTS_FUNCTIONS:
         pass
@@ -210,56 +366,65 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         
         # 如果大模型决定调用工具
         if tool_calls:
-            # 这里简化处理，只执行第一个 tool_call，然后把结果告诉大模型让它总结
             tool_call = tool_calls[0]
             function_name = tool_call.function.name
-            function_args = json.loads(tool_call.function.arguments)
-            
+            try:
+                function_args = json.loads(tool_call.function.arguments or "{}")
+            except Exception:
+                function_args = {}
+            # 强制使用真实项目ID（免费模型经常把 project_id 填错或填 unknown）
+            function_args["project_id"] = project_id
+
+            # 权限：员工不能查看/修改预算与报价
+            if user_id == "employee" and function_name in {
+                "generate_quote_and_schedule", "update_quote_item", "set_margin_rate",
+                "set_shoot_days", "modify_budget", "get_budget_breakdown"
+            }:
+                content = "预算和报价这块你不用管，盯好自己的进度和交付就行。"
+                log_interaction(project_id, user_id, user_message, content, [function_name + "_blocked"])
+                return content
+
             tools_used.append(function_name)
-            
             function_response = execute_function_call(function_name, function_args, session_id, db)
-            
-            # 如果是特殊的无需总结的指令，或者直接返回
+
             if function_name == "save_user_preference":
                 content = f"好的，{function_response}"
                 log_interaction(project_id, user_id, user_message, content, tools_used)
                 return content
 
+            # 关系类工具：给老板固定确认、给员工固定收到，不再二次调用大模型（更快、防止伪造进度）
+            RELAY_TOOLS = {"ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery",
+                           "provide_client_feedback", "schedule_internal_meeting", "transfer_message"}
+            if function_name in RELAY_TOOLS:
+                content = "好的，我已经安排下去了，等他们回复。" if user_id != "employee" else function_response
+                log_interaction(project_id, user_id, user_message, content, tools_used)
+                return content
+            if function_name == "report_to_boss":
+                # 转述内容已由模型写入 report_content 并存给老板，这里只回员工
+                content = "收到，情况我了解了，继续推进。"
+                log_interaction(project_id, user_id, user_message, content, tools_used)
+                return content
+
+            # 报价/排期/查询类工具：返回值本身就是给用户看的好回复，直接用，省一次往返
+            DIRECT_REPLY_TOOLS = {"generate_quote_and_schedule", "update_quote_item", "set_margin_rate",
+                                  "set_shoot_days", "request_overrun", "get_project_overview",
+                                  "get_budget_breakdown", "get_project_timeline", "get_crew_info",
+                                  "get_assets_list", "modify_budget", "update_project_stage",
+                                  "update_crew_assignment", "add_project_asset"}
+            if function_name in DIRECT_REPLY_TOOLS:
+                log_interaction(project_id, user_id, user_message, function_response, tools_used)
+                return function_response
+
+            # 其它工具：二次调用大模型生成自然回复
             messages.append(response_message)
             messages.append({
-                "tool_call_id": tool_call.id,
-                "role": "tool",
-                "name": function_name,
-                "content": function_response,
+                "tool_call_id": tool_call.id, "role": "tool",
+                "name": function_name, "content": function_response,
             })
-            
-            # 第二次对话是为了生成自然的回复给当前用户
-            second_response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages,
-            )
-            content = second_response.choices[0].message.content
-            if content and len(content) > 1000:
+            second_response = client.chat.completions.create(model=MODEL_NAME, messages=messages, max_tokens=400)
+            content = second_response.choices[0].message.content or "好的，已执行操作。"
+            if len(content) > 1000:
                 content = content[:1000] + "…"
-            if not content:
-                content = "好的，已执行操作。"
-                
-            # 修正：当老板发指令让 AI 去问员工时，第二轮大模型有时会自作主张伪造一个“员工说：正常”。
-            # 我们必须强行拦截：如果工具调用是 ask_employee_* 或 urge_employee_* 等发给员工的，
-            # 那么给老板的回复必须是死板的确认，绝不能是虚假的进度。
-            if user_id == "boss" and any(t in tools_used for t in ["ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery", "schedule_internal_meeting", "provide_client_feedback"]):
-                content = "好的，我已经向员工发送了指令，请等待员工回复。"
-                
-            # 补充：修复因为偏好设置错误触发导致返回假信息的 BUG
-            if user_id == "boss" and "save_user_preference" in tools_used and not is_rule:
-                # 如果大模型误触发了保存偏好，并且刚才拦截了 ask_employee_schedule 等工具，也可能在这里出问题。
-                # 我们重新检查用户意图，如果是问进度，强制走询问逻辑。
-                if any(k in user_message for k in ["看看", "张导", "落后", "进度"]):
-                    execute_function_call("ask_employee_schedule", {"project_id": project_id}, session_id, db)
-                    content = "好的，我已经向员工发送了指令，请等待员工回复。"
-                    tools_used = ["ask_employee_schedule"]
-            
-            # 日志记录
             log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
@@ -302,6 +467,40 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         if "401" in error_text or "Invalid token" in error_text:
             return "【AI系统提示】API_KEY 无效或未设置，请检查硅基流动密钥。"
         return f"【AI系统提示】请求大模型出错。可能是 API_KEY 未设置或余额不足。错误信息: {error_text}"
+
+def extract_brief_params(brief_text: str) -> dict:
+    """用大模型从 Brief 抽取生成报价所需的关键参数。失败时返回 {}（上层走默认档案）。"""
+    if not brief_text or not API_KEY:
+        return {}
+    sys = ("你是广告制片助手。从客户Brief中抽取拍摄制作参数，只输出一个JSON对象，"
+           "字段：film_type(影片性质,如宣传片/TVC/创意短视频)、duration_minutes(成片时长,分钟,数字)、"
+           "shoot_days(拍摄天数,整数)、difficulty(难度:低/中/高)、crew_scale(摄制组规格:小/中/大)。"
+           "信息缺失就按常规宣传片合理估计。不要输出JSON以外的任何内容。")
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "system", "content": sys},
+                      {"role": "user", "content": brief_text[:2000]}],
+            temperature=0, max_tokens=200,
+        )
+        txt = resp.choices[0].message.content or ""
+        m = re.search(r"\{.*\}", txt, re.DOTALL)
+        data = json.loads(m.group(0) if m else txt)
+        out = {}
+        if data.get("film_type"):
+            out["film_type"] = str(data["film_type"])[:20]
+        try: out["duration_minutes"] = float(data.get("duration_minutes"))
+        except Exception: pass
+        try: out["shoot_days"] = int(float(data.get("shoot_days")))
+        except Exception: pass
+        if data.get("difficulty") in ("低", "中", "高"):
+            out["difficulty"] = data["difficulty"]
+        if data.get("crew_scale") in ("小", "中", "大"):
+            out["crew_scale"] = data["crew_scale"]
+        return out
+    except Exception:
+        return {}
+
 
 def get_config_snapshot():
     key = API_KEY

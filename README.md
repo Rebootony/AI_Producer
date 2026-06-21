@@ -1,16 +1,49 @@
 # AI 制片 (AI Producer) - 本地全栈运行指南
 
-本项目分为前端（React + Vite）和后端（Python + FastAPI）。通过前后端联动，实现 AI 虚拟制片与不同角色（老板、员工）的动态交互。
+本项目分为前端（React + Vite）和后端（Python + FastAPI）。核心能力：**上传客户 Brief → 一键生成报价单 + 执行排期 → 与 AI 制片实时对话调整**（改单价/人数/拍摄天数/利润率、超支管控），同时保留老板↔员工的传话协作。
 
 ## 目录结构
 - `/frontend` - 前端界面代码
-- `/backend` - 后端逻辑及大模型连接代码
+- `/backend` - 后端逻辑、价格单引擎与大模型连接代码
+
+---
+
+## ⚡ 最快上手（推荐）
+
+Mac 下直接双击或运行：
+```bash
+bash start_mac.command
+```
+它会自动清理旧进程、装依赖、同时启动前后端，并打开浏览器。打开后选「创始人/老板」→ 左侧进「项目 / 达梦」→ 在「项目总览」点「立即生成」，即可看到报价、排期与利润率滑杆。
+
+> 想要干净的初始演示态：删掉 `backend/sql_app_demo.db` 再启动，达梦会回到「未生成」状态。
+
+---
+
+## 🤖 大模型配置（OpenRouter 免费模型）
+
+后端通过 **OpenAI 兼容接口** 连接大模型，默认使用 **OpenRouter 免费模型**。配置在 [`backend/.env`](backend/.env)：
+
+1. 去 https://openrouter.ai → **Keys** 申请一个免费 API Key；
+2. 把它粘到 `.env` 的 `OPENROUTER_API_KEY=` 后面；
+3. 重新运行 `start_mac.command`（或重启后端）。
+
+```env
+LLM_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=你的key
+LLM_MODEL=deepseek/deepseek-chat-v3-0324:free   # 免费且支持工具调用
+LLM_SUPPORTS_FUNCTIONS=true
+```
+
+说明：
+- **不填 key 也能演示**报价/排期/利润率/超支等对话指令（走确定性规则引擎，不经过大模型）；只有「自由聊天 + 传话转述」需要可用的 key。
+- 换模型只改 `LLM_MODEL`（建议选支持 function calling 的 `:free` 模型）；想切回硅基流动，按 `.env` 注释切换即可。
 
 ---
 
 ## 一、启动后端服务 (Backend)
 
-后端提供了 API 接口，并负责连接硅基流动（SiliconFlow）大模型、管理历史记忆以及执行功能调用（Function Calling）。
+后端提供了 API 接口，负责价格单引擎（报价/排期生成）、连接大模型（默认 OpenRouter，见上文配置）、管理历史记忆以及执行功能调用（Function Calling）。
 
 ### 准备工作
 请确保您的电脑已经安装了 **Python 3.8** 或以上版本。

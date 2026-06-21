@@ -69,6 +69,7 @@ interface AppState {
   setSessions: (sessions: Session[]) => void;
 
   projects: Project[];
+  setProjects: (projects: Project[]) => void;
   addProject: (project: Project) => void;
   updateProject: (id: string, data: Partial<Project>) => void;
   
@@ -85,24 +86,24 @@ const initialProjects: Project[] = [
     name: '达梦英文宣传片',
     client: '武汉达梦数据库股份有限公司',
     industry: 'IT-基础软件',
-    budget: 300000,
-    usedBudget: 115000,
+    budget: 0,
+    usedBudget: 0,
     days: 35,
-    deliveryDate: '4月15日',
-    status: 'in_progress',
+    deliveryDate: '—',
+    status: 'planning',
     health: 'good'
   },
   {
     id: 'p2',
-    name: '蔚来ES8跨界TVC',
-    client: '蔚来汽车',
-    industry: '新能源汽车',
-    budget: 1500000,
-    usedBudget: 1450000,
-    days: 60,
-    deliveryDate: '5月20日',
-    status: 'in_progress',
-    health: 'warning'
+    name: '泰康之家·海琴府',
+    client: '泰康之家·海琴府',
+    industry: '高端康养地产',
+    budget: 0,
+    usedBudget: 0,
+    days: 35,
+    deliveryDate: '—',
+    status: 'planning',
+    health: 'good'
   }
 ];
 
@@ -129,7 +130,7 @@ export const useStore = create<AppState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   
   currentProjectId: null,
-  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project_chat', currentSessionId: 'default' }),
+  setCurrentProject: (id) => set({ currentProjectId: id, view: 'project_dashboard', currentSessionId: 'default' }),
   
   currentSessionId: null,
   setCurrentSessionId: (id) => set({ currentSessionId: id, view: 'project_chat' }),
@@ -138,6 +139,7 @@ export const useStore = create<AppState>((set) => ({
   setSessions: (sessions) => set({ sessions }),
   
   projects: initialProjects,
+  setProjects: (projects) => set({ projects }),
   addProject: (project) => set((state) => ({ projects: [project, ...state.projects] })),
   updateProject: (id, data) => set((state) => ({
     projects: state.projects.map(p => p.id === id ? { ...p, ...data } : p)

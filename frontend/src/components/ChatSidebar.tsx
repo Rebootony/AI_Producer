@@ -1,39 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils';
-import { Send, Bot, User, Paperclip, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Paperclip, Loader2, Trash2 } from 'lucide-react';
 
 export function ChatSidebar() {
-  const { messages, setMessages, addMessage, currentUser, currentProjectId, updateProject } = useStore();
+  const { messages, setMessages, addMessage, currentUser, currentProjectId, projects, updateProject } = useStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const currentSessionId = 'default';
+  const currentProject = projects.find(p => p.id === currentProjectId);
 
   const fetchMessages = async () => {
     try {
-      const params: string[] = [];
-      if (currentUser) params.push(`role=${encodeURIComponent(currentUser.role)}`);
-      params.push(`t=${Date.now()}`);
-      const qs = `?${params.join('&')}`;
-      let res = await fetch(`/api/messages_global${qs}`, {
+      // 按当前项目读取对话（不再用全局接口，避免多个项目的消息混在一起）
+      const projectId = currentProjectId || 'p1';
+      const roleParam = currentUser ? `&role=${encodeURIComponent(currentUser.role)}` : '';
+      const res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}&t=${Date.now()}`, {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0'
         }
       });
-      if (!res.ok) {
-        const projectId = currentProjectId || 'p1';
-        const roleParam = currentUser ? `&role=${currentUser.role}` : '';
-        res = await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}${roleParam}&t=${Date.now()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        });
-      }
       if (res.ok) {
         const data = await res.json();
         const mapped = data.messages.map((m: any) => ({
@@ -63,8 +52,9 @@ export function ChatSidebar() {
   // 轮询自动刷新消息
   useEffect(() => {
     if (!currentUser) return;
-    
-    // 初始化时获取一次
+
+    // 切换项目时先清空，避免短暂显示上一个项目的对话
+    setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
     fetchMessages();
 
     // 设置定时器每 3 秒刷新一次
@@ -121,6 +111,15 @@ export function ChatSidebar() {
     }
   };
 
+  const clearChat = async () => {
+    if (!window.confirm('确定清空当前项目的对话记录吗？此操作不可恢复。')) return;
+    const projectId = currentProjectId || 'p1';
+    try {
+      await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}`, { method: 'DELETE' });
+    } catch { /* ignore */ }
+    setMessages([{ id: 'init', role: 'ai', content: '你好，我是AI制片。你可以让我转达任务、推进排期或调整预算。', timestamp: new Date() }]);
+  };
+
   return (
     <div className="flex flex-col h-full bg-zinc-50 flex-1 relative">
       {/* Header */}
@@ -130,14 +129,23 @@ export function ChatSidebar() {
             <Bot size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-800">AI 制片</h2>
+            <h2 className="font-semibold text-zinc-800">
+              AI 制片
+              {currentProject && <span className="text-zinc-400 font-normal"> · {currentProject.name}</span>}
+            </h2>
             <p className="text-xs text-green-600 flex items-center">
               <span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span>
               随时在线
             </p>
           </div>
         </div>
-        <div className="flex space-x-2"></div>
+        <button
+          onClick={clearChat}
+          title="清空当前对话"
+          className="flex items-center text-sm text-zinc-400 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50"
+        >
+          <Trash2 size={16} className="mr-1" />清空对话
+        </button>
       </div>
 
       {/* Messages */}

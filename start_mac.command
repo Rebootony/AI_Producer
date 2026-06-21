@@ -18,10 +18,10 @@ start_backend_foreground() {
   if [ ! -d "venv" ]; then
     python3 -m venv venv
   fi
-  source venv/bin/activate
-  python3 -m pip install --upgrade pip
-  python3 -m pip install -r requirements.txt
-  python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+  source venv/bin/activate 2>/dev/null || true
+  venv/bin/python -m pip install --upgrade pip
+  venv/bin/python -m pip install -r requirements.txt
+  venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 }
 
 start_frontend_foreground() {
@@ -76,7 +76,7 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 BACKEND_LOG="${TMPDIR:-/tmp}/ai_producer_backend_runtime.log"
 rm -f "${BACKEND_LOG}"
-python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
+venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
 BACKEND_PID=$!
 cd "${ROOT_DIR}"
 sleep 1

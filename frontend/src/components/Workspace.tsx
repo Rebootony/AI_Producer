@@ -5,19 +5,34 @@ import { TimelineTab } from './tabs/TimelineTab';
 import { BudgetTab } from './tabs/BudgetTab';
 import { AssetsTab } from './tabs/AssetsTab';
 import { Team } from './Team';
-import { LayoutDashboard, CalendarDays, PieChart, FolderOpen, Users } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, PieChart, FolderOpen, Users, Trash2 } from 'lucide-react';
 
 export function Workspace() {
-  const { activeTab, setActiveTab, currentProjectId, projects } = useStore();
+  const { activeTab, setActiveTab, currentProjectId, projects, currentUser, setProjects, setView } = useStore();
   const currentProject = projects.find(p => p.id === currentProjectId);
+  const isBoss = currentUser?.role === 'boss';
 
-  const tabs = [
+  const deleteProject = async () => {
+    if (!currentProject) return;
+    if (!window.confirm(`确定删除项目「${currentProject.name}」吗？\n报价、排期、对话都会一并删除，不可恢复。`)) return;
+    try {
+      await fetch(`/api/projects/${currentProject.id}`, { method: 'DELETE' });
+    } catch { /* ignore */ }
+    setProjects(projects.filter(p => p.id !== currentProject.id));
+    setView('dashboard');
+  };
+
+  const allTabs = [
     { id: 'overview', label: '项目总览', icon: LayoutDashboard },
     { id: 'timeline', label: '执行排期', icon: CalendarDays },
-    { id: 'budget', label: '预算控制', icon: PieChart },
+    { id: 'budget', label: '预算控制', icon: PieChart, bossOnly: true },
     { id: 'assets', label: '资产管理', icon: FolderOpen },
     { id: 'team', label: '项目团队', icon: Users },
   ] as const;
+  // 预算仅老板可见
+  const tabs = allTabs.filter(t => isBoss || !('bossOnly' in t && t.bossOnly));
+  // 员工若停留在预算页，按总览渲染（不直接改 state，避免渲染期副作用）
+  const effectiveTab = (!isBoss && activeTab === 'budget') ? 'overview' : activeTab;
 
   if (!currentProject) return <div className="flex-1 flex items-center justify-center bg-zinc-50">请选择一个项目</div>;
 
@@ -28,7 +43,7 @@ export function Workspace() {
         <div className="flex space-x-8 h-full">
           {tabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = effectiveTab === tab.id;
             return (
               <button
                 key={tab.id}
@@ -51,16 +66,22 @@ export function Workspace() {
             <span className={`w-2 h-2 rounded-full ${currentProject.health === 'good' ? 'bg-green-500' : 'bg-orange-500'}`}></span>
             <span className="text-sm font-medium text-zinc-700">项目健康度: {currentProject.health === 'good' ? '良好' : '预警'}</span>
           </div>
+          {isBoss && (
+            <button onClick={deleteProject} title="删除项目"
+              className="flex items-center text-sm text-zinc-400 hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-50">
+              <Trash2 size={15} className="mr-1" />删除
+            </button>
+          )}
         </div>
       </div>
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'overview' && <OverviewTab project={currentProject} />}
-        {activeTab === 'timeline' && <TimelineTab project={currentProject} />}
-        {activeTab === 'budget' && <BudgetTab project={currentProject} />}
-        {activeTab === 'assets' && <AssetsTab project={currentProject} />}
-        {activeTab === 'team' && <Team />}
+        {effectiveTab === 'overview' && <OverviewTab project={currentProject} />}
+        {effectiveTab === 'timeline' && <TimelineTab project={currentProject} />}
+        {effectiveTab === 'budget' && isBoss && <BudgetTab project={currentProject} />}
+        {effectiveTab === 'assets' && <AssetsTab project={currentProject} />}
+        {effectiveTab === 'team' && <Team />}
       </div>
     </div>
   );
