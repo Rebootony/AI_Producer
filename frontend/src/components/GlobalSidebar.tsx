@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, Project } from '../store/useStore';
-import { Video, LayoutDashboard, Briefcase, Plus } from 'lucide-react';
+import { Video, LayoutDashboard, Plus } from 'lucide-react';
 import { cn } from '../utils';
 import { NewProjectModal } from './NewProjectModal';
 
@@ -32,7 +32,6 @@ export function GlobalSidebar() {
 
   const navItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: '大盘' },
-    { id: 'project_dashboard', icon: Briefcase, label: '项目' },
   ] as const;
 
   const fetchUnread = async () => {
@@ -87,13 +86,8 @@ export function GlobalSidebar() {
               <button
                 key={item.id}
                 onClick={() => {
-                  if (item.id === 'dashboard') {
-                    setCurrentProject('');
-                    setView('dashboard');
-                  }
-                  if (item.id === 'project_dashboard') {
-                    if (currentProjectId) setView('project_dashboard');
-                  }
+                  setCurrentProject('');
+                  setView('dashboard');
                 }}
                 className="relative flex flex-col items-center justify-center group w-14 h-14"
               >

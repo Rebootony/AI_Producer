@@ -50,7 +50,18 @@
       "Bash(curl -s -X POST http://127.0.0.1:8000/api/projects/p1/generate -H 'Content-Type: application/json' -d '{}')",
       "Bash(curl -s \"http://127.0.0.1:8000/api/projects/p1/quote.xlsx\" -o /tmp/q.xlsx -w \" quote.xlsx -> HTTP %{http_code}, %{size_download} bytes, type=%{content_type}\\\\n\")",
       "Bash(curl -s \"http://127.0.0.1:8000/api/projects/p1/schedule.xlsx\" -o /tmp/s.xlsx -w \" schedule.xlsx -> HTTP %{http_code}, %{size_download} bytes\\\\n\")",
-      "Bash(./venv/bin/python -c \"import openpyxl; wb=openpyxl.load_workbook\\('/tmp/q.xlsx'\\); ws=wb.active; print\\(' 报价xlsx 可打开, 标题:', ws['A1'].value, '| 行数:', ws.max_row\\)\")"
+      "Bash(./venv/bin/python -c \"import openpyxl; wb=openpyxl.load_workbook\\('/tmp/q.xlsx'\\); ws=wb.active; print\\(' 报价xlsx 可打开, 标题:', ws['A1'].value, '| 行数:', ws.max_row\\)\")",
+      "Bash(curl -s \"http://localhost:5173/api/projects\" -o /dev/null -w \" HTTP %{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(./venv/bin/python _fulltest.py)",
+      "Bash(grep -E '\\\\.env$|\\\\.db$|sql_app')",
+      "Bash(git check-ignore *)",
+      "Bash(grep -rn \"/Users/bytedance\" backend/main.py backend/ai_agent.py backend/quote_service.py backend/pricing_engine.py backend/excel_export.py backend/models.py backend/database.py backend/prompt_manager.py backend/logger.py frontend/src)",
+      "Bash(curl -s -X DELETE \"http://127.0.0.1:8000/api/messages/p1?session_id=default\")",
+      "Bash(curl -s -X PUT http://127.0.0.1:8000/api/projects/p1/margin -H 'Content-Type: application/json' -d '{\"margin_rate\":0.25}')",
+      "Bash(python3 -c \"import sys,json;print\\('  ',[p['id']+':'+p['name'] for p in json.load\\(sys.stdin\\)['projects']]\\)\")",
+      "Read(//Users/bytedance/Documents/Github/**)",
+      "Bash(grep -i \"\\\\.db$\")"
     ]
   }
 }

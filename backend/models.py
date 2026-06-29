@@ -86,7 +86,9 @@ class QuoteItem(Base):
     qty_people = Column(Float, default=1)   # 人数/项数
     qty_days = Column(Float, default=1)     # 天数(B段) / 分钟数(C段) / 1(项)
     unit = Column(String, default="项")     # 人*天 / 项 / 分钟 ...
-    amount = Column(Float, default=0.0)     # = unit_price * qty_people * qty_days
+    amount = Column(Float, default=0.0)     # 成本金额 = unit_price * qty_people * qty_days
+    client_unit_price = Column(Float, default=0.0)  # 客户单价(含利润，可独立编辑)；0 表示按全局利润率算
+    is_locked = Column(Integer, default=0)  # 价格锁定：AI/批量调利润率时不动此项
     is_overrun = Column(Integer, default=0) # 是否为超支新增项
     sort_order = Column(Integer, default=0)
     note = Column(String, default="")
@@ -109,6 +111,54 @@ class ScheduleItem(Base):
     sort_order = Column(Integer, default=0)
 
     project = relationship("Project", back_populates="schedule_items")
+
+
+class TeamMember(Base):
+    """项目团队成员（按阶段配置，可增减，可指定项目经理）。"""
+    __tablename__ = "team_members"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"))
+    name = Column(String)
+    role = Column(String)
+    stage = Column(String, default="全程")   # 全程/前期/拍摄/后期
+    is_pm = Column(Integer, default=0)        # 是否项目经理
+    sort_order = Column(Integer, default=0)
+
+    project = relationship("Project")
+
+
+class ProjectGroup(Base):
+    """项目经理"拉的群"：把跨阶段需要对接的人组成一个协作小组。"""
+    __tablename__ = "project_groups"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"))
+    name = Column(String)
+    members = Column(String, default="")     # 逗号分隔的成员名
+    purpose = Column(String, default="")
+    created_at = Column(DateTime(timezone=True), default=get_utc_8)
+
+    project = relationship("Project")
+
+
+class Task(Base):
+    """执行任务：派给执行端（员工）的个人任务。由排期生成，也可由 AI/老板指派。"""
+    __tablename__ = "tasks"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"))
+    title = Column(String)
+    description = Column(String, default="")
+    assignee = Column(String, default="employee")  # 负责人（执行端）
+    stage = Column(String, default="")
+    deliverable = Column(String, default="")        # 交付标准/交付物
+    deadline = Column(String, default="")           # YYYY-MM-DD
+    priority = Column(String, default="中")          # 高/中/低
+    status = Column(String, default="pending")       # pending/in_progress/submitted/done/revision
+    ai_note = Column(String, default="")             # AI 项目经理修改意见
+    submission = Column(String, default="")          # 员工提交说明
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=get_utc_8)
+
+    project = relationship("Project")
 
 
 class ChatThread(Base):

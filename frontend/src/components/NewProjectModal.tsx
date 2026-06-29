@@ -68,8 +68,12 @@ export function NewProjectModal({ open, onClose, onCreated }: Props) {
                 className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             </Field>
             <Field label="影片性质">
-              <input value={form.film_type} onChange={(e) => set('film_type', e.target.value)}
-                className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+              <select value={form.film_type} onChange={(e) => set('film_type', e.target.value)}
+                className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
+                {['宣传片', '纪录片', 'TVC', '宣传视频', '短视频', '创意视频', '活动视频'].map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </Field>
             <Field label="拍摄天数">
               <input type="number" min={1} value={form.shoot_days} onChange={(e) => set('shoot_days', Number(e.target.value))}

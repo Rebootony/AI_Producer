@@ -3,6 +3,7 @@ import os
 import re
 from pathlib import Path
 from openai import OpenAI
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import models
@@ -32,13 +33,30 @@ if "openrouter" in BASE_URL:
 
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL, default_headers=_default_headers)
 
+import time as _time
+
+def _llm_create(**kwargs):
+    """带重试的模型调用：免费模型偶发 429 限流时，自动等待重试几次。"""
+    last = None
+    for attempt in range(3):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            last = e
+            es = str(e)
+            if attempt < 2 and ("429" in es or "rate" in es.lower() or "temporarily" in es.lower()):
+                _time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+    raise last
+
 tools = [
     {"type": "function", "function": {"name": "get_project_overview", "description": "获取客户信息、核心目标、制作周期与总预算", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
-    {"type": "function", "function": {"name": "get_budget_breakdown", "description": "获取前期、拍摄、后期等具体费用拆解", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "get_budget_breakdown", "description": "获取报价的成本核算、利润率、毛利、对客户实收以及各段(前期/拍摄/后期/杂费)费用。当被问到'毛利率/利润/利润率/报价多少/成本多少/预算/还有提升空间吗'时调用。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "modify_budget", "description": "修改项目的总预算，或者记录特定细项的超支增加", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "amount": {"type": "number", "description": "增减金额"}, "reason": {"type": "string"}}, "required": ["project_id", "amount", "reason"]}}},
     {"type": "function", "function": {"name": "get_project_timeline", "description": "获取项目排期、当前阶段及预计交付时间", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "update_project_stage", "description": "更新项目的执行阶段（planning, shooting, post_production）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "new_stage": {"type": "string"}}, "required": ["project_id", "new_stage"]}}},
-    {"type": "function", "function": {"name": "get_crew_info", "description": "获取当前项目分配的主创人员名单（导演、制片等）及工作天数", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
+    {"type": "function", "function": {"name": "get_crew_info", "description": "获取项目团队成员名单（按阶段，含项目经理）。当被问到'团队/几个人/都有谁/谁负责'时调用。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "update_crew_assignment", "description": "更新人员安排，如换人或增加工作天数", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "role", "name", "days"]}}},
     {"type": "function", "function": {"name": "get_assets_list", "description": "获取已经产出并归档的项目交付物/资产列表", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
     {"type": "function", "function": {"name": "add_project_asset", "description": "记录新的资产文件上传或确认交付物已完成", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "asset_name": {"type": "string"}, "asset_type": {"type": "string"}}, "required": ["project_id", "asset_name", "asset_type"]}}},
@@ -51,7 +69,12 @@ tools = [
     {"type": "function", "function": {"name": "schedule_internal_meeting", "description": "通知员工安排内部开会或堪景等日程", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "meeting_info": {"type": "string"}}, "required": ["project_id", "meeting_info"]}}},
     {"type": "function", "function": {"name": "report_to_boss", "description": "员工回复后，AI调用此工具向后台/老板记录情况（附带员工原话在双引号内）", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "report_content": {"type": "string", "description": "向后台记录的内容，需将员工原话放在双引号内"}}, "required": ["project_id", "report_content"]}}},
     {"type": "function", "function": {"name": "generate_quote_and_schedule", "description": "根据项目 Brief 一键生成（或重新生成）报价单与执行排期。当老板说'生成报价/出个报价/排个期/按brief算一下'时调用。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
-    {"type": "function", "function": {"name": "update_quote_item", "description": "修改报价单里某一项的单价/人数/天数并自动重算。例如老板说'导演按5000算'(改unit_price)、'摄影加一个人'(改qty_people)、'拍摄加一天'(改qty_days)。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string", "description": "报价项名称，如 导演/摄影/剪辑"}, "unit_price": {"type": "number"}, "qty_people": {"type": "number"}, "qty_days": {"type": "number"}}, "required": ["project_id", "item_name"]}}},
+    {"type": "function", "function": {"name": "update_quote_item", "description": "修改报价单里某一项的成本单价/人数/天数/客户单价并自动重算。例如'导演成本按5000算'(unit_price)、'导演给客户报8000'(client_unit_price)、'摄影加一个人'(qty_people)。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string", "description": "报价项名称，如 导演/摄影/剪辑"}, "unit_price": {"type": "number", "description": "成本单价"}, "client_unit_price": {"type": "number", "description": "客户单价(含利润)"}, "qty_people": {"type": "number"}, "qty_days": {"type": "number"}}, "required": ["project_id", "item_name"]}}},
+    {"type": "function", "function": {"name": "lock_quote_item", "description": "锁定/解锁某个报价项的价格。锁定后批量调利润率不会改动它。例如'锁定导演的价格'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}, "locked": {"type": "boolean", "description": "true 锁定 / false 解锁"}}, "required": ["project_id", "item_name", "locked"]}}},
+    {"type": "function", "function": {"name": "add_quote_item", "description": "新增一个报价项。例如'加一项场地费 2000'。phase: A前期/B拍摄/C后期/D杂费。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}, "phase": {"type": "string"}, "unit_price": {"type": "number"}, "qty_people": {"type": "number"}, "qty_days": {"type": "number"}, "unit": {"type": "string"}}, "required": ["project_id", "item_name", "unit_price"]}}},
+    {"type": "function", "function": {"name": "delete_quote_item", "description": "删除一个报价项。例如'删掉道具这一项'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}}, "required": ["project_id", "item_name"]}}},
+    {"type": "function", "function": {"name": "set_target_price", "description": "按目标总报价反推：客户只给了一个总价(如11万/20万)时，把未锁定项等比拉匀到该总价。例如'客户就给11万，按这个报'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_price": {"type": "number", "description": "目标实收总价(元)"}}, "required": ["project_id", "target_price"]}}},
+    {"type": "function", "function": {"name": "set_target_margin", "description": "按目标毛利率反推报价：例如'目标毛利率做到35%'就传 0.35，系统反推总价并拉匀未锁定项。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_margin": {"type": "number", "description": "毛利率小数，如 0.35"}}, "required": ["project_id", "target_margin"]}}},
     {"type": "function", "function": {"name": "set_margin_rate", "description": "调整项目利润率(毛利率)并重算实收报价。例如老板说'利润率提到30%'就传 0.3。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "margin_rate": {"type": "number", "description": "小数，如 0.25 表示25%"}}, "required": ["project_id", "margin_rate"]}}},
     {"type": "function", "function": {"name": "request_overrun", "description": "员工/执行层申请追加预算或报销超支时调用。AI作为流程执行者：≤2000元可自行批准，超出则打回让其找老板。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}, "amount": {"type": "number"}, "reason": {"type": "string"}}, "required": ["project_id", "amount", "reason"]}}},
     {"type": "function", "function": {"name": "set_shoot_days", "description": "调整拍摄天数。会联动更新 B 段拍摄费用并重新倒推排期。例如老板说'拍摄加一天'或'改成拍4天'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "days"]}}}
@@ -64,7 +87,8 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         return "找不到该项目"
 
     if name == "get_project_overview":
-        return f"客户: {project.client}, 行业: {project.industry}, 目标: {project.goal}, 交付: {project.delivery_date}, 总预算: {project.budget}"
+        # 不含金额（预算/报价只在 get_budget_breakdown，且对员工屏蔽），避免向员工泄露预算
+        return f"客户: {project.client}, 行业: {project.industry}, 目标: {project.goal}, 影片: {project.film_type}, 交付: {project.delivery_date}, 拍摄: {project.shoot_days}天"
     elif name == "get_budget_breakdown":
         items = db.query(models.QuoteItem).filter(models.QuoteItem.project_id == project.id).order_by(models.QuoteItem.sort_order).all()
         if not items:
@@ -85,9 +109,13 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
         db.commit()
         return f"阶段已更新为：{args['new_stage']}"
     elif name == "get_crew_info":
-        crews = db.query(models.Crew).filter(models.Crew.project_id == project.id).all()
-        res = ", ".join([f"{c.role}({c.name}) {c.days}天" for c in crews])
-        return f"当前人员: {res if res else '无'}"
+        members = db.query(models.TeamMember).filter(models.TeamMember.project_id == project.id).order_by(models.TeamMember.is_pm.desc(), models.TeamMember.sort_order).all()
+        if not members:
+            return "这个项目还没配置团队成员（生成项目后会自动配一套默认团队）。"
+        names = "、".join(m.name for m in members)
+        pm = next((m.name for m in members if m.is_pm), None)
+        extra = f"，项目经理是{pm}" if pm else ""
+        return f"项目团队 {len(members)} 人：{names}{extra}。"
     elif name == "update_crew_assignment":
         crew = db.query(models.Crew).filter(models.Crew.project_id == project.id, models.Crew.role == args["role"]).first()
         if crew:
@@ -152,12 +180,42 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
                 f"拍摄 {project.shoot_days} 天，看板已更新。")
     elif name == "update_quote_item":
         res = quote_service.update_quote_item(
-            db, project.id, args.get("item_name"),
-            unit_price=args.get("unit_price"), qty_people=args.get("qty_people"), qty_days=args.get("qty_days"))
+            db, project.id, item_name=args.get("item_name"),
+            unit_price=args.get("unit_price"), qty_people=args.get("qty_people"),
+            qty_days=args.get("qty_days"), client_unit_price=args.get("client_unit_price"))
         if not res.get("ok"):
             return res.get("msg", "改不了这一项")
-        return (f"已把「{res['item']}」改好，该项现在 {res['amount']:.0f} 元，"
-                f"成本核算 {res['cost_total']:.0f}，实收 {res['client_price']:.0f}。")
+        return (f"已把「{res['item']}」改好，成本核算 {res['cost_total']:.0f}，实收 {res['client_price']:.0f}。")
+    elif name == "lock_quote_item":
+        res = quote_service.update_quote_item(db, project.id, item_name=args.get("item_name"),
+                                              is_locked=bool(args.get("locked")))
+        if not res.get("ok"):
+            return res.get("msg", "找不到这一项")
+        return f"「{res['item']}」价格已{'锁定' if args.get('locked') else '解锁'}，批量调利润率时{'不会' if args.get('locked') else '会'}动它。"
+    elif name == "add_quote_item":
+        res = quote_service.add_quote_item(
+            db, project.id, phase=args.get("phase", "D"), item_name=args.get("item_name", "新增项"),
+            unit_price=args.get("unit_price", 0), qty_people=args.get("qty_people", 1),
+            qty_days=args.get("qty_days", 1), unit=args.get("unit", "项"))
+        return f"已新增报价项「{args.get('item_name')}」，实收变为 {res['client_price']:.0f}。"
+    elif name == "delete_quote_item":
+        item = quote_service._find_item(db, project.id, item_name=args.get("item_name"))
+        if not item:
+            return f"报价里没找到「{args.get('item_name')}」。"
+        res = quote_service.delete_quote_item(db, project.id, item.id)
+        return f"已删除「{args.get('item_name')}」，实收变为 {res['client_price']:.0f}。"
+    elif name == "set_target_price":
+        res = quote_service.set_target_client_price(db, project.id, args.get("target_price", 0))
+        if not res.get("ok"):
+            return res.get("msg", "反推失败")
+        return (f"已按目标 {res['target']:.0f} 元把未锁定项拉匀，现在实收 {res['client_price']:.0f}，"
+                f"成本 {res['cost_total']:.0f}，毛利率 {res['gross_margin']*100:.0f}%。")
+    elif name == "set_target_margin":
+        res = quote_service.set_target_margin(db, project.id, args.get("target_margin", 0.25))
+        if not res.get("ok"):
+            return res.get("msg", "反推失败")
+        return (f"已按目标毛利率 {res.get('target_margin',0)*100:.0f}% 反推：实收调到 {res['client_price']:.0f}，"
+                f"成本 {res['cost_total']:.0f}，实际毛利率 {res['gross_margin']*100:.0f}%。")
     elif name == "set_margin_rate":
         totals = quote_service.set_margin(db, project.id, args.get("margin_rate", 0.25))
         return (f"利润率已调到 {project.margin_rate*100:.0f}%，成本 {totals['cost_total']:.0f} 不变，"
@@ -306,11 +364,8 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             log_interaction(project_id, user_id, user_message, content, ["save_user_preference_fallback"])
             return content
 
-    # —— 规则命令层：命中报价/排期/利润率/超支等确定性指令则直接执行（不依赖大模型）——
-    rb = try_rule_command(user_message, user_id, project_id, db)
-    if rb is not None:
-        log_interaction(project_id, user_id, user_message, rb, ["rule_command"])
-        return rb
+    # 注：旧的"规则命令层"已停用 —— 硬性要求：所有回答都必须经过大模型。
+    # 工具只负责确定性地算数/取数，措辞一律交给模型组织（见下方 tool_calls 处理）。
 
     if not SUPPORTS_FUNCTIONS:
         pass
@@ -320,10 +375,15 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         # 这里已移除旧版的硬编码工具直接发送老板原话的逻辑，完全交给大模型自主判断上下文，仅在极特殊情况下防幻觉。
         pass
 
-    # 1. 获取历史记录（最近10条）
+    # 1. 获取历史记录（最近10条）——按角色可见性过滤，避免把老板的预算对话喂进员工的上下文（防泄露）
     history = db.query(models.Message).filter(
         models.Message.project_id == project_id,
-        models.Message.session_id == session_id
+        models.Message.session_id == session_id,
+        or_(
+            models.Message.target_role == None,
+            models.Message.target_role == user_id,     # user_id 即 'boss'/'employee'
+            models.Message.sender_id == user_id,
+        )
     ).order_by(models.Message.timestamp.desc()).limit(10).all()
     history = list(reversed(history))
     
@@ -339,10 +399,19 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         
     try:
         if SUPPORTS_FUNCTIONS:
-            # 取消强制员工只能使用 report_to_boss，让大模型自行判断是否需要汇报
-            tools_to_use = tools
-            
-            response = client.chat.completions.create(
+            # 员工(执行端)只给一小套工具：能查自己相关信息、能汇报/申请，但不能动预算、也不能用"派活给员工"这类老板专用工具
+            if user_id == "employee":
+                emp_blocked = {
+                    "generate_quote_and_schedule", "update_quote_item", "set_margin_rate", "set_shoot_days",
+                    "modify_budget", "get_budget_breakdown", "lock_quote_item", "add_quote_item",
+                    "delete_quote_item", "set_target_price", "set_target_margin",
+                    "ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery",
+                    "provide_client_feedback", "schedule_internal_meeting", "transfer_message"}
+                tools_to_use = [t for t in tools if t["function"]["name"] not in emp_blocked]
+            else:
+                tools_to_use = tools
+
+            response = _llm_create(
                 model=MODEL_NAME,
                 messages=messages,
                 tools=tools_to_use,
@@ -351,7 +420,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 temperature=0.2
             )
         else:
-            response = client.chat.completions.create(
+            response = _llm_create(
                 model=MODEL_NAME,
                 messages=messages,
                 max_tokens=512,
@@ -378,7 +447,9 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             # 权限：员工不能查看/修改预算与报价
             if user_id == "employee" and function_name in {
                 "generate_quote_and_schedule", "update_quote_item", "set_margin_rate",
-                "set_shoot_days", "modify_budget", "get_budget_breakdown"
+                "set_shoot_days", "modify_budget", "get_budget_breakdown",
+                "lock_quote_item", "add_quote_item", "delete_quote_item",
+                "set_target_price", "set_target_margin"
             }:
                 content = "预算和报价这块你不用管，盯好自己的进度和交付就行。"
                 log_interaction(project_id, user_id, user_message, content, [function_name + "_blocked"])
@@ -405,37 +476,22 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 log_interaction(project_id, user_id, user_message, content, tools_used)
                 return content
 
-            # 报价/排期/查询类工具：返回值本身就是给用户看的好回复，直接用，省一次往返
-            DIRECT_REPLY_TOOLS = {"generate_quote_and_schedule", "update_quote_item", "set_margin_rate",
-                                  "set_shoot_days", "request_overrun", "get_project_overview",
-                                  "get_budget_breakdown", "get_project_timeline", "get_crew_info",
-                                  "get_assets_list", "modify_budget", "update_project_stage",
-                                  "update_crew_assignment", "add_project_asset"}
-            if function_name in DIRECT_REPLY_TOOLS:
-                log_interaction(project_id, user_id, user_message, function_response, tools_used)
-                return function_response
-
-            # 其它工具：二次调用大模型生成自然回复
+            # 所有报价/排期/查询/动作类工具：把工具的准确结果交回大模型，由模型用自然语言措辞回复。
+            # （硬性要求：回答必须经过模型，不能直接甩工具原文。）
             messages.append(response_message)
             messages.append({
                 "tool_call_id": tool_call.id, "role": "tool",
                 "name": function_name, "content": function_response,
             })
-            second_response = client.chat.completions.create(model=MODEL_NAME, messages=messages, max_tokens=400)
-            content = second_response.choices[0].message.content or "好的，已执行操作。"
-            if len(content) > 1000:
-                content = content[:1000] + "…"
+            messages.append({"role": "system", "content": "现在用自然、口语化的中文、像真人项目经理一样，根据上面工具的结果直接回答用户这句话。只说重点和关键数字（数字必须用工具里的准确值），绝不要原样罗列字段或把整张数据表甩出来。一两句话即可。"})
+            try:
+                second = _llm_create(model=MODEL_NAME, messages=messages, max_tokens=500, temperature=0.4)
+                content = second.choices[0].message.content or function_response
+            except Exception:
+                content = function_response  # 仅当模型二次调用失败时，才退回工具原文以免丢数据
+            if len(content) > 1200:
+                content = content[:1200] + "…"
             log_interaction(project_id, user_id, user_message, content, tools_used)
-            return content
-
-        if any(key in user_message for key in ["阶段", "排期", "进度"]) and not any(k in user_message for k in ["催", "看看", "落后", "张导", "问", "员工"]):
-            content = execute_function_call("get_project_timeline", {"project_id": project_id}, session_id, db)
-            log_interaction(project_id, user_id, user_message, content, ["get_project_timeline_fallback"])
-            return content
-
-        if any(key in user_message for key in ["预算", "多少钱", "成本", "花费"]) and not any(k in user_message for k in ["催", "看看", "张导", "落后", "问"]):
-            content = execute_function_call("get_project_overview", {"project_id": project_id}, session_id, db)
-            log_interaction(project_id, user_id, user_message, content, ["get_project_overview_fallback"])
             return content
 
         content = response_message.content
@@ -446,27 +502,15 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             
         # 日志记录
         log_interaction(project_id, user_id, user_message, content, tools_used)
-        
-        # 修正：当 AI 执行完工具后，如果返回的 content 就是函数的结果，那就不需要给发消息的人额外存一条奇怪的回复。
-        # 这里我们在 chat_with_llm 中返回内容。如果 content 是工具直接返回的字符串（比如 "已成功向老板汇报"），
-        # 并且用户是员工，那这句话其实是回复给员工确认的，没有问题。
-        # 但如果是老板说“看看进度是不是落后了”，工具返回 "已向员工询问排期进度。"
-        # 这句话应该回复给老板。之前出 Bug 是因为老板这边的上下文被污染了。
-        
-        # 终极修复：如果当前用户是 employee，且模型最终生成的 content 包含了给老板汇报的话术，
-        # 说明模型没有正确走 tool_call，或者二次回答的时候又重复了一遍。
-        if user_id == "employee" and ("老板" in content or "汇报" in content):
-            # 只有当 AI 真的说了“向老板汇报”这类漏嘴的话，我们才强制帮他调用工具掩盖，并替换文本
-            execute_function_call("report_to_boss", {"project_id": project_id, "report_content": content}, session_id, db)
-            content = "收到，情况我已了解，继续推进。"
-            
         return content
 
     except Exception as e:
         error_text = str(e)
-        if "401" in error_text or "Invalid token" in error_text:
-            return "【AI系统提示】API_KEY 无效或未设置，请检查硅基流动密钥。"
-        return f"【AI系统提示】请求大模型出错。可能是 API_KEY 未设置或余额不足。错误信息: {error_text}"
+        if "429" in error_text or "rate" in error_text.lower() or "temporarily" in error_text.lower():
+            return "AI 这会儿有点忙（免费模型限流了），稍等几秒再发一次就好。"
+        if "401" in error_text or "Invalid token" in error_text or "No auth" in error_text:
+            return "【系统】API Key 无效，请检查 backend/.env 里的 OPENROUTER_API_KEY。"
+        return f"【系统】AI 暂时不可用，请稍后重试。({error_text[:100]})"
 
 def extract_brief_params(brief_text: str) -> dict:
     """用大模型从 Brief 抽取生成报价所需的关键参数。失败时返回 {}（上层走默认档案）。"""
@@ -477,7 +521,7 @@ def extract_brief_params(brief_text: str) -> dict:
            "shoot_days(拍摄天数,整数)、difficulty(难度:低/中/高)、crew_scale(摄制组规格:小/中/大)。"
            "信息缺失就按常规宣传片合理估计。不要输出JSON以外的任何内容。")
     try:
-        resp = client.chat.completions.create(
+        resp = _llm_create(
             model=MODEL_NAME,
             messages=[{"role": "system", "content": sys},
                       {"role": "user", "content": brief_text[:2000]}],

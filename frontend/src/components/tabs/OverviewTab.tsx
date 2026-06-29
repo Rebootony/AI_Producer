@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Target, Clock, DollarSign, Building, Wand2, Loader2, CheckCircle2, FileText, Upload, Save, Pencil } from 'lucide-react';
 import { Project, useStore } from '../../store/useStore';
+import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
 
 interface BackendProject {
   id: string; name: string; client: string; industry: string; goal: string;
@@ -30,16 +31,27 @@ export function OverviewTab({ project }: { project: Project }) {
     return () => clearInterval(id);
   }, [fetchProject]);
 
+  const [genOpen, setGenOpen] = useState(false);
+  const genMs = DURATION_MS[complexityOf(p?.shoot_days, p?.duration_minutes)];
+
   const generate = async () => {
     setGenerating(true);
+    setGenOpen(true);
+    const start = Date.now();
     try {
       await fetch(`/api/projects/${project.id}/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
       });
-      await fetchProject();
+    } catch { /* ignore */ }
+    const wait = genMs - (Date.now() - start);   // 让生成过程至少演示到设定时长（按复杂度）
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    setGenOpen(false);
+    setGenerating(false);
+    await fetchProject();
+    try {
       const pr = await (await fetch(`/api/projects/${project.id}`)).json();
       updateProject(project.id, { budget: pr.client_price });
-    } finally { setGenerating(false); }
+    } catch { /* ignore */ }
   };
 
   const [editing, setEditing] = useState(false);
@@ -96,6 +108,7 @@ export function OverviewTab({ project }: { project: Project }) {
 
   return (
     <div className="p-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <GenerationOverlay open={genOpen} projectName={p?.name || project.name} totalMs={genMs} />
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white text-sm px-4 py-3 rounded-xl shadow-lg flex items-center animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle2 size={16} className="mr-2 text-green-400" />{toast}

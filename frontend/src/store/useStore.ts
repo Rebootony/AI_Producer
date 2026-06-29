@@ -76,6 +76,8 @@ interface AppState {
   messages: Message[];
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void;
+  chatProjectId: string | null;            // 当前 messages 属于哪个项目（切看板/对话不清空，切项目才清空）
+  setChatProjectId: (id: string) => void;
 
   team: TeamMember[];
 }
@@ -147,6 +149,8 @@ export const useStore = create<AppState>((set) => ({
 
   messages: [],
   setMessages: (messages) => set({ messages }),
+  chatProjectId: null,
+  setChatProjectId: (id) => set({ chatProjectId: id }),
   addMessage: (msg) => set((state) => ({
     messages: [
       ...state.messages,

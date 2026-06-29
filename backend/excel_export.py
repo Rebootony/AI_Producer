@@ -116,6 +116,14 @@ def build_quote_xlsx(db, project_id: str, version: str = "client") -> bytes:
     return buf.getvalue()
 
 
+from datetime import datetime as _dt
+
+def _days_between(a: str, b: str) -> int:
+    try:
+        return (_dt.strptime(b, "%Y-%m-%d") - _dt.strptime(a, "%Y-%m-%d")).days + 1
+    except Exception:
+        return 1
+
 def build_schedule_xlsx(db, project_id: str) -> bytes:
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     s = quote_service.serialize_schedule(db, project_id)
@@ -125,12 +133,13 @@ def build_schedule_xlsx(db, project_id: str) -> bytes:
     ws = wb.active
     ws.title = "执行排期"
 
-    ws["A1"] = f"{project.name} · 执行排期"
+    ws["A1"] = f"{project.name} · 执行排期表"
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = f"交付日 {project.delivery_date}（倒推） · 拍摄 {project.shoot_days or 0} 天"
+    ws["A2"] = f"交付日 {project.delivery_date}（倒推） · 拍摄 {project.shoot_days or 0} 天 · ★为关键节点（不可随意变）"
     ws["A2"].font = Font(color="6B7280")
 
-    headers = ["阶段", "任务", "开始", "结束", "关键节点", "需客户配合", "状态"]
+    headers = ["项目阶段", "任务名称", "任务说明", "负责人", "协作人", "开始时间", "结束时间",
+               "持续天数", "交付物", "当前状态", "优先级", "风险等级", "备注"]
     hr = 4
     for i, h in enumerate(headers, 1):
         ws.cell(row=hr, column=i, value=h)
@@ -139,16 +148,28 @@ def build_schedule_xlsx(db, project_id: str) -> bytes:
     status_cn = {"completed": "已完成", "current": "进行中", "pending": "待办"}
     r = hr + 1
     for it in items:
+        task = it["task"]
+        ms = it["is_milestone"]
+        nc = it["needs_client"]
+        note = "关键节点（不可变）" if ms else ("需客户配合" if nc else "")
+        priority = "高" if ms else ("中" if nc else "中")
+        risk = "中" if (ms or nc) else "低"
         ws.cell(row=r, column=1, value=it["stage"])
-        ws.cell(row=r, column=2, value=it["task"])
-        ws.cell(row=r, column=3, value=it["start_date"])
-        ws.cell(row=r, column=4, value=it["end_date"])
-        ws.cell(row=r, column=5, value="★ 是" if it["is_milestone"] else "")
-        ws.cell(row=r, column=6, value="是" if it["needs_client"] else "")
-        ws.cell(row=r, column=7, value=status_cn.get(it["status"], it["status"]))
+        ws.cell(row=r, column=2, value=("★ " if ms else "") + task)
+        ws.cell(row=r, column=3, value=task)
+        ws.cell(row=r, column=4, value=quote_service.eng.task_owner(task))
+        ws.cell(row=r, column=5, value=quote_service.eng.task_collab(task))
+        ws.cell(row=r, column=6, value=it["start_date"])
+        ws.cell(row=r, column=7, value=it["end_date"])
+        ws.cell(row=r, column=8, value=_days_between(it["start_date"], it["end_date"]))
+        ws.cell(row=r, column=9, value=quote_service.eng.task_deliverable(task))
+        ws.cell(row=r, column=10, value=status_cn.get(it["status"], it["status"]))
+        ws.cell(row=r, column=11, value=priority)
+        ws.cell(row=r, column=12, value=risk)
+        ws.cell(row=r, column=13, value=note)
         r += 1
 
-    widths = [8, 28, 12, 12, 10, 10, 8]
+    widths = [9, 26, 24, 11, 16, 12, 12, 9, 24, 9, 8, 9, 16]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[chr(64 + i)].width = w
 

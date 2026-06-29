@@ -80,7 +80,8 @@ def client_unit_price(cost_unit: float, margin_rate: float) -> float:
 
 
 def compute_totals(items: list, tax_rate: float = 0.01, margin_rate: float = 0.25) -> dict:
-    """利润摊到每一条明细：客户单价=成本单价×(1+利润率)。客户实收=各明细客户金额之和（与明细自洽）。"""
+    """汇总：items 每项含 amount(成本金额) 与 client_amount(客户金额，由 service 按每行客户单价算好)。
+    客户实收 = 各明细客户金额之和（与明细自洽）。"""
     cost_total = 0.0
     client_total = 0.0
     subtotals = {}          # 成本分段小计
@@ -88,16 +89,10 @@ def compute_totals(items: list, tax_rate: float = 0.01, margin_rate: float = 0.2
     for it in items:
         ph = it["phase"]
         cost_amt = it["amount"]
+        cl_amt = it.get("client_amount", cost_amt)
         cost_total += cost_amt
-        subtotals[ph] = subtotals.get(ph, 0.0) + cost_amt
-        up = it.get("unit_price")
-        people = it.get("qty_people", 1)
-        days = it.get("qty_days", 1)
-        if up is not None:
-            cl_amt = client_unit_price(up, margin_rate) * people * days
-        else:
-            cl_amt = round(cost_amt * (1 + margin_rate))
         client_total += cl_amt
+        subtotals[ph] = subtotals.get(ph, 0.0) + cost_amt
         client_subtotals[ph] = client_subtotals.get(ph, 0.0) + cl_amt
     tax = cost_total * tax_rate
     profit = client_total - cost_total
@@ -108,6 +103,7 @@ def compute_totals(items: list, tax_rate: float = 0.01, margin_rate: float = 0.2
         "margin_rate": margin_rate,
         "profit": round(profit, 2),
         "client_price": round(client_total, 2),
+        "gross_margin": round(profit / client_total, 4) if client_total else 0.0,  # 整体毛利率=毛利/营收
         "subtotals": {k: round(v, 2) for k, v in subtotals.items()},
         "client_subtotals": {k: round(v, 2) for k, v in client_subtotals.items()},
     }
@@ -198,7 +194,7 @@ DAMENG_QUOTE_PROFILE = [
     {"phase": "C", "item_name": "版权素材", "unit_price": 5000, "qty_people": 1, "qty_days": 1, "unit": "项"},
     {"phase": "D", "item_name": "演职人员餐食", "unit_price": 70, "qty_people": 16, "qty_days": 3, "unit": "人*天"},
     {"phase": "D", "item_name": "设备车", "unit_price": 500, "qty_people": 1, "qty_days": 3, "unit": "人*天"},
-    {"phase": "D", "item_name": "机动费用", "unit_price": 1000, "qty_people": 3, "qty_days": 1, "unit": "天"},
+    {"phase": "D", "item_name": "机动费用", "unit_price": 1000, "qty_people": 1, "qty_days": 3, "unit": "天"},
 ]
 
 # 通用默认 profile（无 Brief 信息时的兜底：一条常规 5 分钟宣传片）
@@ -247,6 +243,63 @@ PROJECT_PROFILES = {
     "p2": {"profile": TAIKANG_QUOTE_PROFILE, "shoot_days": 3, "duration_minutes": 6,
            "difficulty": "中", "film_type": "品牌宣传片"},
 }
+
+
+# ============ 排期/任务字段映射（被 excel_export 与 quote_service 共用）============
+
+def task_owner(task: str) -> str:
+    t = task or ""
+    if any(k in t for k in ("需求", "脚本", "大纲", "分镜")):
+        return "策划/编剧"
+    if any(k in t for k in ("PPM", "堪景", "拍摄前准备")):
+        return "制片"
+    if "拍摄 DAY" in t or t.startswith("拍摄"):
+        return "导演"
+    if any(k in t for k in ("Acopy", "Bcopy", "剪辑", "调色", "素材", "修改", "包装")):
+        return "后期剪辑"
+    if "交付" in t:
+        return "制片"
+    return "制片"
+
+
+def task_collab(task: str) -> str:
+    t = task or ""
+    if any(k in t for k in ("需求", "脚本", "大纲")):
+        return "制片/客户"
+    if "PPM" in t or "堪景" in t:
+        return "导演/摄影"
+    if t.startswith("拍摄") or "拍摄 DAY" in t:
+        return "摄影/灯光/制片"
+    if any(k in t for k in ("Acopy", "Bcopy", "调色")):
+        return "调色/音乐/客户"
+    if "交付" in t:
+        return "客户对接"
+    return "—"
+
+
+def task_deliverable(task: str) -> str:
+    t = task or ""
+    if "需求" in t:
+        return "需求确认"
+    if "脚本大纲" in t:
+        return "脚本大纲"
+    if "脚本" in t or "分镜" in t:
+        return "拍摄脚本/分镜"
+    if "PPM" in t:
+        return "PPM 方案"
+    if "堪景" in t or "拍摄前准备" in t:
+        return "堪景报告/拍摄执行计划"
+    if "拍摄 DAY" in t or t.startswith("拍摄"):
+        return "拍摄原始素材"
+    if "Acopy" in t:
+        return "A copy（完成度 80%）"
+    if "Bcopy" in t:
+        return "B copy（完成度 95%）"
+    if "调色" in t:
+        return "调色版本"
+    if "交付" in t:
+        return "成片交付（Final）"
+    return "阶段产出物"
 
 
 def get_project_profile(project_id: str) -> dict:

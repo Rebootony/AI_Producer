@@ -113,7 +113,9 @@ def _migrate():
     """对已存在的库做轻量迁移（SQLite ADD COLUMN，不丢数据）。"""
     with engine.connect() as conn:
         for stmt in ["ALTER TABLE assets ADD COLUMN file_path VARCHAR",
-                     "ALTER TABLE assets ADD COLUMN kind VARCHAR DEFAULT 'upload'"]:
+                     "ALTER TABLE assets ADD COLUMN kind VARCHAR DEFAULT 'upload'",
+                     "ALTER TABLE quote_items ADD COLUMN client_unit_price FLOAT DEFAULT 0",
+                     "ALTER TABLE quote_items ADD COLUMN is_locked INTEGER DEFAULT 0"]:
             try:
                 conn.execute(text(stmt))
                 conn.commit()
@@ -472,6 +474,18 @@ class QuoteItemUpdate(BaseModel):
     unit_price: Optional[float] = None
     qty_people: Optional[float] = None
     qty_days: Optional[float] = None
+    client_unit_price: Optional[float] = None
+    is_locked: Optional[bool] = None
+    item_name: Optional[str] = None
+
+class QuoteItemCreate(BaseModel):
+    phase: str = "D"
+    item_name: str = "新增项"
+    unit_price: float = 0
+    qty_people: float = 1
+    qty_days: float = 1
+    unit: str = "项"
+    client_unit_price: Optional[float] = None
 
 @app.post("/api/projects/{project_id}/generate")
 def generate_project(project_id: str, req: GenerateRequest, db: Session = Depends(get_db)):
@@ -576,15 +590,40 @@ def update_margin(project_id: str, req: MarginRequest, db: Session = Depends(get
 
 @app.put("/api/projects/{project_id}/quote/items/{item_id}")
 def update_quote_item_api(project_id: str, item_id: int, req: QuoteItemUpdate, db: Session = Depends(get_db)):
-    item = db.query(models.QuoteItem).filter(
-        models.QuoteItem.id == item_id, models.QuoteItem.project_id == project_id
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Quote item not found")
     res = quote_service.update_quote_item(
-        db, project_id, item.item_name,
-        unit_price=req.unit_price, qty_people=req.qty_people, qty_days=req.qty_days
+        db, project_id, item_id=item_id,
+        unit_price=req.unit_price, qty_people=req.qty_people, qty_days=req.qty_days,
+        client_unit_price=req.client_unit_price, is_locked=req.is_locked, new_name=req.item_name,
     )
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("msg", "Quote item not found"))
+    return {"status": "ok", "result": res, "quote": quote_service.serialize_quote(db, project_id)}
+
+@app.post("/api/projects/{project_id}/quote/items")
+def add_quote_item_api(project_id: str, req: QuoteItemCreate, db: Session = Depends(get_db)):
+    res = quote_service.add_quote_item(
+        db, project_id, phase=req.phase, item_name=req.item_name, unit_price=req.unit_price,
+        qty_people=req.qty_people, qty_days=req.qty_days, unit=req.unit,
+        client_unit_price=req.client_unit_price)
+    return {"status": "ok", "result": res, "quote": quote_service.serialize_quote(db, project_id)}
+
+@app.delete("/api/projects/{project_id}/quote/items/{item_id}")
+def delete_quote_item_api(project_id: str, item_id: int, db: Session = Depends(get_db)):
+    res = quote_service.delete_quote_item(db, project_id, item_id)
+    return {"status": "ok", "result": res, "quote": quote_service.serialize_quote(db, project_id)}
+
+class TargetRequest(BaseModel):
+    target_client_price: Optional[float] = None
+    target_margin: Optional[float] = None   # 毛利率 0-0.95
+
+@app.put("/api/projects/{project_id}/quote/target")
+def set_quote_target(project_id: str, req: TargetRequest, db: Session = Depends(get_db)):
+    if req.target_client_price is not None:
+        res = quote_service.set_target_client_price(db, project_id, req.target_client_price)
+    elif req.target_margin is not None:
+        res = quote_service.set_target_margin(db, project_id, req.target_margin)
+    else:
+        res = {"ok": False, "msg": "请提供目标实收或目标毛利率"}
     return {"status": "ok", "result": res, "quote": quote_service.serialize_quote(db, project_id)}
 
 class BriefRequest(BaseModel):
@@ -668,6 +707,100 @@ def dashboard(db: Session = Depends(get_db)):
         "total_client_price": total_price, "total_cost": total_cost,
         "total_profit": total_price - total_cost, "risk_count": risk,
     }
+
+class TaskNote(BaseModel):
+    note: str = ""
+
+class TaskUpdate(BaseModel):
+    status: Optional[str] = None
+    ai_note: Optional[str] = None
+    priority: Optional[str] = None
+    deadline: Optional[str] = None
+    title: Optional[str] = None
+
+@app.get("/api/tasks")
+def list_tasks(assignee: str = "employee", db: Session = Depends(get_db)):
+    return quote_service.serialize_tasks(db, assignee)
+
+@app.post("/api/tasks/{task_id}/submit")
+def submit_task_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.submit_task(db, task_id, req.note)}
+
+@app.post("/api/tasks/{task_id}/feedback")
+def task_feedback_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.task_feedback(db, task_id, req.note)}
+
+@app.put("/api/tasks/{task_id}")
+def update_task_api(task_id: int, req: TaskUpdate, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.update_task(
+        db, task_id, status=req.status, ai_note=req.ai_note, priority=req.priority,
+        deadline=req.deadline, title=req.title)}
+
+class TeamMemberReq(BaseModel):
+    name: str = "新成员"
+    role: str = "成员"
+    stage: str = "全程"
+
+class TeamMemberPatch(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    stage: Optional[str] = None
+    is_pm: Optional[bool] = None
+
+class GroupReq(BaseModel):
+    name: str
+    members: str = ""
+    purpose: str = ""
+
+@app.get("/api/projects/{project_id}/team")
+def get_team(project_id: str, db: Session = Depends(get_db)):
+    return quote_service.serialize_team(db, project_id)
+
+@app.post("/api/projects/{project_id}/team")
+def add_team_member(project_id: str, req: TeamMemberReq, db: Session = Depends(get_db)):
+    rows = db.query(models.TeamMember).filter(models.TeamMember.project_id == project_id).all()
+    nxt = max([r.sort_order for r in rows], default=0) + 1
+    db.add(models.TeamMember(project_id=project_id, name=req.name, role=req.role, stage=req.stage, sort_order=nxt))
+    db.commit()
+    return {"status": "ok", "team": quote_service.serialize_team(db, project_id)}
+
+@app.put("/api/projects/{project_id}/team/{member_id}")
+def update_team_member(project_id: str, member_id: int, req: TeamMemberPatch, db: Session = Depends(get_db)):
+    m = db.query(models.TeamMember).filter(models.TeamMember.id == member_id, models.TeamMember.project_id == project_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="成员不存在")
+    if req.is_pm is True:
+        # 一个项目只有一个项目经理
+        for other in db.query(models.TeamMember).filter(models.TeamMember.project_id == project_id).all():
+            other.is_pm = 0
+        m.is_pm = 1
+    elif req.is_pm is False:
+        m.is_pm = 0
+    for k in ("name", "role", "stage"):
+        v = getattr(req, k)
+        if v is not None:
+            setattr(m, k, v)
+    db.commit()
+    return {"status": "ok", "team": quote_service.serialize_team(db, project_id)}
+
+@app.delete("/api/projects/{project_id}/team/{member_id}")
+def delete_team_member(project_id: str, member_id: int, db: Session = Depends(get_db)):
+    db.query(models.TeamMember).filter(models.TeamMember.id == member_id, models.TeamMember.project_id == project_id).delete()
+    db.commit()
+    quote_service._ensure_team(db, project_id)  # 删了PM自动补
+    return {"status": "ok", "team": quote_service.serialize_team(db, project_id)}
+
+@app.post("/api/projects/{project_id}/groups")
+def create_group(project_id: str, req: GroupReq, db: Session = Depends(get_db)):
+    db.add(models.ProjectGroup(project_id=project_id, name=req.name, members=req.members, purpose=req.purpose))
+    db.commit()
+    return {"status": "ok", "team": quote_service.serialize_team(db, project_id)}
+
+@app.delete("/api/projects/{project_id}/groups/{group_id}")
+def delete_group(project_id: str, group_id: int, db: Session = Depends(get_db)):
+    db.query(models.ProjectGroup).filter(models.ProjectGroup.id == group_id, models.ProjectGroup.project_id == project_id).delete()
+    db.commit()
+    return {"status": "ok", "team": quote_service.serialize_team(db, project_id)}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

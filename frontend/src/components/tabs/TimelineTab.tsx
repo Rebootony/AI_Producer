@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { cn } from '../../utils';
 import { Project, useStore } from '../../store/useStore';
 import { CheckCircle2, Wand2, Loader2, Star, Users, Flag, Download } from 'lucide-react';
+import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
 
 interface SchedItem {
   id: number; stage: string; task: string; start_date: string; end_date: string;
@@ -34,19 +35,26 @@ export function TimelineTab({ project }: { project: Project }) {
     return () => clearInterval(id);
   }, [fetchSchedule]);
 
+  const [genOpen, setGenOpen] = useState(false);
+  const genMs = DURATION_MS[complexityOf(data?.shoot_days, undefined)];
   const generate = async () => {
-    setGenerating(true);
+    setGenerating(true); setGenOpen(true);
+    const start = Date.now();
     try {
       await fetch(`/api/projects/${project.id}/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
       });
-      await fetchSchedule();
-    } finally { setGenerating(false); }
+    } catch { /* ignore */ }
+    const wait = genMs - (Date.now() - start);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    setGenOpen(false); setGenerating(false);
+    await fetchSchedule();
   };
 
   if (!data || !data.generated || data.items.length === 0) {
     return (
       <div className="p-8 max-w-3xl mx-auto">
+        <GenerationOverlay open={genOpen} projectName={project.name} totalMs={genMs} />
         <h2 className="text-2xl font-bold text-zinc-900 mb-2">执行排期</h2>
         <p className="text-zinc-500 mb-8">按客户交付日倒推，自动生成各阶段节点。</p>
         <div className="bg-white rounded-2xl border border-dashed border-zinc-300 p-12 text-center">

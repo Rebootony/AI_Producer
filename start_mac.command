@@ -71,9 +71,9 @@ cd "${ROOT_DIR}/backend"
 if [ ! -d "venv" ]; then
   python3 -m venv venv
 fi
-source venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+source venv/bin/activate 2>/dev/null || true
+venv/bin/python -m pip install --upgrade pip
+venv/bin/python -m pip install -r requirements.txt
 BACKEND_LOG="${TMPDIR:-/tmp}/ai_producer_backend_runtime.log"
 rm -f "${BACKEND_LOG}"
 venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
