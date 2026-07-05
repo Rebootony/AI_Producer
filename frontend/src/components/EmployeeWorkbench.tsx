@@ -5,8 +5,9 @@ import { cn } from '../utils';
 
 interface Task {
   id: number; project_id: string; project_name: string; title: string; description: string;
-  stage: string; deliverable: string; deadline: string; priority: string; status: string;
+  stage: string; deliverable: string; start_date: string; deadline: string; priority: string; status: string;
   ai_note: string; submission: string;
+  collaborators: string; background: string; requirements: string; ref_material: string;
 }
 
 const STATUS_CN: Record<string, string> = { pending: '待办', in_progress: '进行中', submitted: '已提交', done: '已完成', revision: '待修改' };
@@ -45,10 +46,10 @@ export function EmployeeWorkbench() {
     await fetchTasks();
   };
   const feedback = async (t: Task) => {
-    const note = window.prompt(`就「${t.title}」向 AI 项目经理反馈什么问题？`, '');
+    const note = window.prompt(`就「${t.title}」向项目经理诺亚反馈什么问题？`, '');
     if (!note) return;
     await fetch(`/api/tasks/${t.id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
-    window.alert('已反馈给 AI 项目经理。');
+    window.alert('已反馈给项目经理诺亚。');
   };
   const start = async (t: Task) => {
     await fetch(`/api/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'in_progress' }) });
@@ -59,6 +60,8 @@ export function EmployeeWorkbench() {
   const submitted = tasks.filter((t) => t.status === 'submitted');
   const done = tasks.filter((t) => t.status === 'done');
   const today = active.filter((t) => { const di = deadlineInfo(t.deadline); return di.label === '今天截止' || di.label.startsWith('逾期'); });
+  // 今日聚焦：进行中/待办里按截止日排序，取最近的几条作为个人计划
+  const focusPlan = [...active].sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999')).slice(0, 6);
 
   return (
     <div className="flex-1 overflow-y-auto bg-zinc-50/50 p-8">
@@ -74,6 +77,25 @@ export function EmployeeWorkbench() {
           <Stat icon={<Inbox size={18} />} color="purple" label="已提交待审" value={submitted.length} />
           <Stat icon={<CheckCircle2 size={18} />} color="green" label="已完成" value={done.length} />
         </div>
+
+        {focusPlan.length > 0 && (
+          <div className="mb-8 bg-white rounded-2xl border border-zinc-200 shadow-sm p-5">
+            <h2 className="font-semibold text-zinc-900 flex items-center mb-3"><CalendarClock size={17} className="mr-2 text-blue-500" />今日聚焦 · 我的计划</h2>
+            <div className="space-y-1.5">
+              {focusPlan.map((t) => {
+                const di = deadlineInfo(t.deadline);
+                return (
+                  <div key={t.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-50 last:border-0">
+                    <span className="text-xs text-zinc-400 w-36 shrink-0 tabular-nums">{t.start_date || '—'} → {t.deadline || '—'}</span>
+                    <span className="text-sm text-zinc-800 flex-1 truncate">{t.title}</span>
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 shrink-0">{STATUS_CN[t.status] || t.status}</span>
+                    <span className={cn('text-xs shrink-0 w-20 text-right', di.cls)}>{di.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {tasks.length === 0 && (
           <div className="bg-white rounded-2xl border border-dashed border-zinc-300 p-12 text-center text-zinc-400">
@@ -115,14 +137,17 @@ function Card({ t, onStart, onSubmit, onFeedback }: { t: Task; onStart?: (t: Tas
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-        <div><span className="text-zinc-400">交付标准：</span><span className="text-zinc-700">{t.deliverable || '—'}</span></div>
-        <div><span className="text-zinc-400">截止：</span><span className="text-zinc-700">{t.deadline || '—'}</span></div>
+        <div><span className="text-zinc-400">周期：</span><span className="text-zinc-700">{t.start_date || '—'} → {t.deadline || '—'}</span></div>
+        <div><span className="text-zinc-400">协作人：</span><span className="text-zinc-700">{t.collaborators || '—'}</span></div>
+        <div className="col-span-2"><span className="text-zinc-400">交付标准：</span><span className="text-zinc-700">{t.deliverable || '—'}</span></div>
       </div>
-      {t.description && <p className="text-sm text-zinc-500 mt-2">{t.description}</p>}
+      {t.requirements && <p className="text-sm text-zinc-600 mt-2"><span className="text-zinc-400">任务要求：</span>{t.requirements}</p>}
+      {(t.background || t.description) && <p className="text-sm text-zinc-500 mt-1">{t.background || t.description}</p>}
+      {t.ref_material && <p className="text-xs text-zinc-400 mt-1">参考资料：{t.ref_material}</p>}
 
       {t.ai_note && (
         <div className="mt-3 bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm">
-          <span className="font-medium text-amber-700 flex items-center mb-1"><Bot size={14} className="mr-1.5" />AI 项目经理修改意见</span>
+          <span className="font-medium text-amber-700 flex items-center mb-1"><Bot size={14} className="mr-1.5" />诺亚的修改意见</span>
           <span className="text-amber-800">{t.ai_note}</span>
         </div>
       )}

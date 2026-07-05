@@ -23,6 +23,20 @@ SUPPORTS_FUNCTIONS = os.getenv("LLM_SUPPORTS_FUNCTIONS", "false").lower() == "tr
 if not API_KEY and "localhost" in BASE_URL:
     API_KEY = "ollama"
 
+API_KEY = (API_KEY or "").strip()
+
+def _key_configured() -> bool:
+    """有效 key 应为纯 ASCII 且有一定长度；空值 / 中文占位符 / 明显过短的都视为未配置。"""
+    if not API_KEY or len(API_KEY) < 12:
+        return False
+    try:
+        API_KEY.encode("ascii")
+        return True
+    except Exception:
+        return False
+
+KEY_HINT = "我的 API key 还没配好——backend/.env 里的 OPENROUTER_API_KEY 现在不是有效 key（像是中文占位符或空的）。把真实 key 填进去、重启后端就能用了。"
+
 # OpenRouter 推荐(可选)的排行 headers
 _default_headers = None
 if "openrouter" in BASE_URL:
@@ -37,6 +51,8 @@ import time as _time
 
 def _llm_create(**kwargs):
     """带重试的模型调用：免费模型偶发 429 限流时，自动等待重试几次。"""
+    if not _key_configured():
+        raise RuntimeError("LLM_KEY_MISSING")
     last = None
     for attempt in range(3):
         try:
@@ -49,6 +65,65 @@ def _llm_create(**kwargs):
                 continue
             raise
     raise last
+
+import re as _re
+def _sanitize_md(s):
+    """去掉模型偶尔冒出的 Markdown 符号（**加粗**、# 标题），纯文本气泡里更干净。"""
+    if not s:
+        return s
+    s = s.replace("**", "").replace("__", "")
+    s = _re.sub(r'(?m)^\s{0,3}#{1,6}\s+', '', s)
+    return s
+
+
+_PROP_LABELS = [
+    ("conclusion", ["当前结论", "结论"]),
+    ("_reason", ["问题原因", "原因"]),
+    ("impact", ["影响判断", "影响"]),
+    ("_opt", ["可选解决方案", "可选方案"]),
+    ("option_a", ["方案一", "方案A", "方案1", "方案 A"]),
+    ("option_b", ["方案二", "方案B", "方案2", "方案 B"]),
+    ("option_c", ["方案三", "方案C", "方案3", "方案 C"]),
+    ("recommend", ["我的推荐", "AI推荐", "诺亚推荐", "推荐", "建议"]),
+    ("decision", ["需要你定", "需要决策事项", "需要决策", "需决策"]),
+]
+
+def fields_summary(msg):
+    """从老板的原话里去掉"做成方案卡片/让我拍板"这类措辞，留一句话当卡片摘要。"""
+    s = msg or ""
+    for kw in ("做成方案卡片", "方案卡片", "决策卡片", "做成卡片", "让我拍板", "拍板", "拍个板",
+               "让我定夺", "决策卡", "生成卡片", "帮我", "整理成", "一张", "一个"):
+        s = s.replace(kw, "")
+    return s.strip("，,。.、 ").strip()[:50]
+
+
+def _parse_proposal_text(text, fallback=""):
+    """把诺亚的结构化分析文本按行标签解析成决策卡片字段（行内的 优点:/缺点: 会归入当前方案）。"""
+    fields = {k: "" for k, _ in _PROP_LABELS}
+    cur = None
+    for line in (text or "").splitlines():
+        s = line.strip()
+        hit = None
+        for key, alts in _PROP_LABELS:
+            for a in alts:
+                if s.startswith(a):
+                    hit = (key, s[len(a):].lstrip("：:").strip())
+                    break
+            if hit:
+                break
+        if hit:
+            cur, rest = hit[0], hit[1]
+            fields[cur] = rest
+        elif cur and s:
+            fields[cur] = (fields[cur] + " " + s).strip()
+    concl = fields.get("conclusion", "")
+    return {
+        "summary": ((fallback or concl or (text or "")[:40]).strip())[:60],
+        "conclusion": concl, "impact": fields.get("impact", ""),
+        "option_a": fields.get("option_a", ""), "option_b": fields.get("option_b", ""),
+        "option_c": fields.get("option_c", ""), "recommend": fields.get("recommend", ""),
+        "decision": fields.get("decision", ""),
+    }
 
 tools = [
     {"type": "function", "function": {"name": "get_project_overview", "description": "获取客户信息、核心目标、制作周期与总预算", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]}}},
@@ -77,7 +152,9 @@ tools = [
     {"type": "function", "function": {"name": "set_target_margin", "description": "按目标毛利率反推报价：例如'目标毛利率做到35%'就传 0.35，系统反推总价并拉匀未锁定项。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "target_margin": {"type": "number", "description": "毛利率小数，如 0.35"}}, "required": ["project_id", "target_margin"]}}},
     {"type": "function", "function": {"name": "set_margin_rate", "description": "调整项目利润率(毛利率)并重算实收报价。例如老板说'利润率提到30%'就传 0.3。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "margin_rate": {"type": "number", "description": "小数，如 0.25 表示25%"}}, "required": ["project_id", "margin_rate"]}}},
     {"type": "function", "function": {"name": "request_overrun", "description": "员工/执行层申请追加预算或报销超支时调用。AI作为流程执行者：≤2000元可自行批准，超出则打回让其找老板。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "item_name": {"type": "string"}, "amount": {"type": "number"}, "reason": {"type": "string"}}, "required": ["project_id", "amount", "reason"]}}},
-    {"type": "function", "function": {"name": "set_shoot_days", "description": "调整拍摄天数。会联动更新 B 段拍摄费用并重新倒推排期。例如老板说'拍摄加一天'或'改成拍4天'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "days"]}}}
+    {"type": "function", "function": {"name": "set_shoot_days", "description": "调整拍摄天数。会联动更新 B 段拍摄费用并重新倒推排期。例如老板说'拍摄加一天'或'改成拍4天'。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "days": {"type": "integer"}}, "required": ["project_id", "days"]}}},
+    {"type": "function", "function": {"name": "set_tax_rate", "description": "调整税点/税率。例如老板说'税点改成6%'就传 0.06（传 6 也可）。会更新含税报价，不改各明细成本。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "rate": {"type": "number", "description": "税率小数，如 0.06；或百分数 6"}}, "required": ["project_id", "rate"]}}},
+    {"type": "function", "function": {"name": "raise_proposal", "description": "把需要老板拍板的重大风险/方向取舍整理成【决策方案卡片】推给老板（老板可一键确认选方案/驳回/要求补充）。当老板问的是重大取舍/风险/方向问题，或明确说'做成方案卡片/让我拍板'时调用。要把结论、影响、2-3个方案、你的推荐和需要决策事项都填上。", "parameters": {"type": "object", "properties": {"project_id": {"type": "string"}, "summary": {"type": "string", "description": "问题摘要一句话"}, "conclusion": {"type": "string", "description": "当前结论"}, "impact": {"type": "string", "description": "影响判断"}, "option_a": {"type": "string", "description": "方案A(含优缺点)"}, "option_b": {"type": "string", "description": "方案B(含优缺点)"}, "option_c": {"type": "string", "description": "方案C(可空)"}, "recommend": {"type": "string", "description": "推荐哪个方案及理由"}, "decision": {"type": "string", "description": "需要老板定的事"}}, "required": ["project_id", "summary", "option_a", "option_b"]}}}
 ]
 
 def execute_function_call(name: str, args: dict, session_id: str, db: Session):
@@ -230,6 +307,21 @@ def execute_function_call(name: str, args: dict, session_id: str, db: Session):
             return res.get("msg", "改不了拍摄天数")
         return (f"拍摄天数从 {res['old']} 天改成 {res['days']} 天，B 段费用和排期都已重算："
                 f"成本核算 {res['cost_total']:.0f}，实收 {res['client_price']:.0f}。")
+    elif name == "set_tax_rate":
+        res = quote_service.set_tax_rate(db, project.id, args.get("rate", 0.01))
+        if not res.get("ok"):
+            return res.get("msg", "改不了税点")
+        return (f"税点已调到 {res['tax_rate']*100:.0f}%。不含税实收 {res['client_price']:.0f}，"
+                f"含税报价 {res['client_price_tax']:.0f}（税额约 {res['tax']:.0f}）。")
+    elif name == "raise_proposal":
+        res = quote_service.create_proposal(
+            db, project.id, summary=args.get("summary", ""), conclusion=args.get("conclusion", ""),
+            impact=args.get("impact", ""), option_a=args.get("option_a", ""),
+            option_b=args.get("option_b", ""), option_c=args.get("option_c", ""),
+            recommend=args.get("recommend", ""), decision=args.get("decision", ""))
+        if not res.get("ok"):
+            return res.get("msg", "方案卡片没建成")
+        return "我已经把这个决策整理成【方案卡片】放到你的项目总览了，你可以直接确认选方案、驳回或要求我补充。"
 
     return "未知函数"
 
@@ -396,7 +488,22 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
         role = "assistant" if msg.sender_id == "ai_producer" else "user"
         prefix = "" if role == "assistant" else f"[{msg.sender_id} 说] "
         messages.append({"role": role, "content": prefix + msg.content})
-        
+
+    # 老板明确要"决策方案卡片/让我拍板"时：让模型按固定结构分析，再解析成卡片字段（比让免费模型直接调工具可靠得多）
+    CARD_KW = ("方案卡片", "决策卡片", "做成卡片", "拍板", "拍个板", "让我定夺", "决策卡", "生成卡片")
+    if SUPPORTS_FUNCTIONS and user_id != "employee" and any(k in user_message for k in CARD_KW):
+        try:
+            amsgs = messages + [{"role": "system", "content": "针对老板这个问题，用【固定结构】逐行输出（每项一行、用中文冒号）：当前结论：/问题原因：/影响判断：/方案一：/方案二：/方案三：/我的推荐：/需要你定：。每个方案要含优缺点，涉及的数字必须用工具/项目里的真实值。不要用 Markdown 符号。"}]
+            resp = _llm_create(model=MODEL_NAME, messages=amsgs, max_tokens=800, temperature=0.4)
+            text = _sanitize_md(resp.choices[0].message.content or "")
+            fields = _parse_proposal_text(text, fallback=fields_summary(user_message))
+            if fields.get("summary") and (fields.get("option_a") or fields.get("option_b")):
+                quote_service.create_proposal(db, project_id, **fields)
+                log_interaction(project_id, user_id, user_message, text, ["raise_proposal"])
+                return "我已经把这个决策整理成【方案卡片】放到你的项目总览了，可以直接确认选方案 / 驳回 / 要求补充。\n\n" + text
+        except Exception:
+            pass  # 失败就退回正常流程
+
     try:
         if SUPPORTS_FUNCTIONS:
             # 员工(执行端)只给一小套工具：能查自己相关信息、能汇报/申请，但不能动预算、也不能用"派活给员工"这类老板专用工具
@@ -404,7 +511,7 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 emp_blocked = {
                     "generate_quote_and_schedule", "update_quote_item", "set_margin_rate", "set_shoot_days",
                     "modify_budget", "get_budget_breakdown", "lock_quote_item", "add_quote_item",
-                    "delete_quote_item", "set_target_price", "set_target_margin",
+                    "delete_quote_item", "set_target_price", "set_target_margin", "set_tax_rate", "raise_proposal",
                     "ask_employee_schedule", "ask_employee_risk", "urge_employee_delivery",
                     "provide_client_feedback", "schedule_internal_meeting", "transfer_message"}
                 tools_to_use = [t for t in tools if t["function"]["name"] not in emp_blocked]
@@ -444,12 +551,12 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
             # 强制使用真实项目ID（免费模型经常把 project_id 填错或填 unknown）
             function_args["project_id"] = project_id
 
-            # 权限：员工不能查看/修改预算与报价
+            # 权限：员工不能查看/修改预算与报价（运行时兜底：即便模型硬调被过滤掉的工具，也在此拦下）
             if user_id == "employee" and function_name in {
                 "generate_quote_and_schedule", "update_quote_item", "set_margin_rate",
                 "set_shoot_days", "modify_budget", "get_budget_breakdown",
                 "lock_quote_item", "add_quote_item", "delete_quote_item",
-                "set_target_price", "set_target_margin"
+                "set_target_price", "set_target_margin", "set_tax_rate", "raise_proposal"
             }:
                 content = "预算和报价这块你不用管，盯好自己的进度和交付就行。"
                 log_interaction(project_id, user_id, user_message, content, [function_name + "_blocked"])
@@ -483,18 +590,19 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
                 "tool_call_id": tool_call.id, "role": "tool",
                 "name": function_name, "content": function_response,
             })
-            messages.append({"role": "system", "content": "现在用自然、口语化的中文、像真人项目经理一样，根据上面工具的结果直接回答用户这句话。只说重点和关键数字（数字必须用工具里的准确值），绝不要原样罗列字段或把整张数据表甩出来。一两句话即可。"})
+            messages.append({"role": "system", "content": "现在以项目经理『诺亚』的身份，根据上面工具的结果回答用户。数字必须用工具里的准确值，绝不要原样罗列字段或把整张数据表甩出来。一般事实性/闲聊问题：一两句口语化即可。若用户问的是风险/预算/延期/方向取舍/'怎么办、有没有问题、行不行'等决策类问题：按人设要求用结构化输出（当前结论 / 问题原因 / 影响判断 / 可选方案(各含优缺点) / 我的推荐 / 需要你定），分行、不用 Markdown 符号，带着判断和方案，别只丢一句结论。"})
             try:
                 second = _llm_create(model=MODEL_NAME, messages=messages, max_tokens=500, temperature=0.4)
                 content = second.choices[0].message.content or function_response
             except Exception:
                 content = function_response  # 仅当模型二次调用失败时，才退回工具原文以免丢数据
+            content = _sanitize_md(content)
             if len(content) > 1200:
                 content = content[:1200] + "…"
             log_interaction(project_id, user_id, user_message, content, tools_used)
             return content
 
-        content = response_message.content
+        content = _sanitize_md(response_message.content)
         if content and len(content) > 1000:
             content = content[:1000] + "…"
         if not content and not tool_calls:
@@ -506,6 +614,8 @@ def chat_with_llm(user_message: str, user_id: str, project_id: str, session_id: 
 
     except Exception as e:
         error_text = str(e)
+        if "LLM_KEY_MISSING" in error_text or "ascii" in error_text.lower():
+            return f"【诺亚】{KEY_HINT}"
         if "429" in error_text or "rate" in error_text.lower() or "temporarily" in error_text.lower():
             return "AI 这会儿有点忙（免费模型限流了），稍等几秒再发一次就好。"
         if "401" in error_text or "Invalid token" in error_text or "No auth" in error_text:

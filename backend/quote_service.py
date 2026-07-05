@@ -23,16 +23,29 @@ def _payload(items, margin: float):
 
 
 def _write_schedule_and_tasks(db: Session, project_id: str, delivery_date: str, days: int):
-    """重建排期 + 由排期派生执行任务（派给执行端）。"""
+    """重建排期 + 由排期派生执行任务（派给执行端），并写全任务字段与线性依赖链。"""
     db.query(models.ScheduleItem).filter(models.ScheduleItem.project_id == project_id).delete()
     db.query(models.Task).filter(models.Task.project_id == project_id).delete()
+    db.flush()
+    created = []
     for s in eng.generate_schedule(delivery_date, days):
         db.add(models.ScheduleItem(project_id=project_id, **s))
-        db.add(models.Task(
+        need = "（需客户配合确认）" if s.get("needs_client") else ""
+        t = models.Task(
             project_id=project_id, title=s["task"], description=f"{s['stage']}阶段 · {s['task']}",
             assignee="employee", stage=s["stage"], deliverable=eng.task_deliverable(s["task"]),
-            deadline=s["end_date"], priority="高" if s["is_milestone"] else "中",
-            status="pending", sort_order=s["sort_order"]))
+            start_date=s["start_date"], deadline=s["end_date"],
+            priority="高" if s["is_milestone"] else "中", status="pending",
+            collaborators=eng.task_collab(s["task"]),
+            background=f"{s['stage']}阶段任务：{s['task']}{need}。",
+            requirements=f"按{s['stage']}标准完成「{s['task']}」，产出可评审的{eng.task_deliverable(s['task'])}。",
+            ref_material="客户 Brief、项目脚本与价格单",
+            sort_order=s["sort_order"])
+        db.add(t)
+        created.append(t)
+    db.flush()  # 拿到 id 后，串成线性依赖链（前一个任务是后一个的前置）
+    for prev, cur in zip(created, created[1:]):
+        cur.depends_on = prev.id
 
 
 DEFAULT_TEAM = [
@@ -145,6 +158,26 @@ def set_margin(db: Session, project_id: str, margin_rate: float) -> dict:
             it.client_unit_price = eng.client_unit_price(it.unit_price, m)
     db.commit()
     return recompute_totals(db, project)
+
+
+def set_tax_rate(db: Session, project_id: str, rate: float) -> dict:
+    """调整税点。传 0.06 或 6 都当 6%。不改各明细，只影响含税报价与税额。"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return {"ok": False, "msg": "项目不存在"}
+    try:
+        r = float(rate)
+    except Exception:
+        return {"ok": False, "msg": "税率不合法"}
+    if r > 1:          # 传 6 表示 6%
+        r = r / 100.0
+    r = max(0.0, min(r, 0.5))
+    project.tax_rate = r
+    totals = recompute_totals(db, project)
+    db.commit()
+    return {"ok": True, "tax_rate": r, "client_price": totals["client_price"],
+            "client_price_tax": totals.get("client_price_tax", totals["client_price"]),
+            "tax": totals.get("tax", 0)}
 
 
 def set_target_client_price(db: Session, project_id: str, target_total: float) -> dict:
@@ -342,9 +375,13 @@ def _task_dict(t, project_name=""):
     return {
         "id": t.id, "project_id": t.project_id, "project_name": project_name,
         "title": t.title, "description": t.description or "", "assignee": t.assignee,
-        "stage": t.stage, "deliverable": t.deliverable or "", "deadline": t.deadline or "",
+        "stage": t.stage, "deliverable": t.deliverable or "",
+        "start_date": t.start_date or "", "deadline": t.deadline or "",
         "priority": t.priority or "中", "status": t.status or "pending",
         "ai_note": t.ai_note or "", "submission": t.submission or "",
+        "collaborators": t.collaborators or "", "background": t.background or "",
+        "requirements": t.requirements or "", "ref_material": t.ref_material or "",
+        "depends_on": t.depends_on,
     }
 
 
@@ -358,15 +395,237 @@ def serialize_tasks(db: Session, assignee: str = "employee") -> dict:
     return {"tasks": items}
 
 
+_STATUS_CN = {"pending": "待办", "in_progress": "进行中", "submitted": "待初审",
+              "revision": "退回修改", "done": "已完成", "delayed": "已延期"}
+
+
+def serialize_execution(db: Session, project_id: str) -> dict:
+    """Boss 端「执行看板」：项目整体进度 + 每条任务当前谁在做/什么状态/是否延期/诺亚备注。"""
+    from datetime import date
+    rows = (db.query(models.Task)
+              .filter(models.Task.project_id == project_id)
+              .order_by(models.Task.sort_order, models.Task.id).all())
+    members = db.query(models.TeamMember).filter(models.TeamMember.project_id == project_id).all()
+    today = date.today().isoformat()
+
+    def owner_for(t):
+        # 优先匹配同阶段的团队成员，否则回落到执行人（员工=张导）
+        for m in members:
+            if m.stage and t.stage and (m.stage in t.stage or t.stage in m.stage) and m.stage != "全程":
+                return m.name
+        return "张导" if t.assignee == "employee" else (t.assignee or "—")
+
+    def next_step(t):
+        s = t.status
+        if s == "done":
+            return "已完成，进入下一节点"
+        if s in ("submitted", "revision"):
+            return "诺亚初审中"
+        if s == "in_progress":
+            return f"按标准推进，{t.deadline or '按期'}前提交" if t.deadline else "按标准推进并提交"
+        return "待启动"
+
+    items = []
+    for t in rows:
+        overdue = bool(t.deadline) and t.deadline < today and t.status != "done"
+        d = _task_dict(t)
+        d.update({
+            "owner": owner_for(t),
+            "status_cn": _STATUS_CN.get(t.status, t.status),
+            "overdue": overdue,
+            "next_step": next_step(t),
+        })
+        items.append(d)
+
+    total = len(rows)
+    done = sum(1 for t in rows if t.status == "done")
+    prog = {
+        "total": total,
+        "done": done,
+        "in_progress": sum(1 for t in rows if t.status == "in_progress"),
+        "submitted": sum(1 for t in rows if t.status in ("submitted", "revision")),
+        "pending": sum(1 for t in rows if t.status == "pending"),
+        "overdue": sum(1 for t in items if t["overdue"]),
+        "rate": round(done / total * 100) if total else 0,
+    }
+    return {"progress": prog, "tasks": items}
+
+
+_EDITABLE_TASK_FIELDS = ("title", "description", "deliverable", "start_date", "deadline",
+                         "priority", "status", "ai_note", "submission", "assignee", "stage",
+                         "collaborators", "background", "requirements", "ref_material", "depends_on")
+
+
+def _pdate(s):
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime((s or "").strip(), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _reschedule_from(db: Session, project_id: str, root_id: int) -> list:
+    """§1.3 自动重排：某任务日期变化后，沿依赖链把"会早于前置结束就开始"的后续任务顺延（保持各自时长）。"""
+    from datetime import timedelta
+    tasks = {t.id: t for t in db.query(models.Task).filter(models.Task.project_id == project_id).all()}
+    children = {}
+    for t in tasks.values():
+        if t.depends_on:
+            children.setdefault(t.depends_on, []).append(t)
+    shifted, seen, stack = [], set(), [root_id]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        parent = tasks.get(pid)
+        pend = _pdate(parent.deadline) if parent else None
+        if not pend:
+            continue
+        for ch in children.get(pid, []):
+            min_start = pend + timedelta(days=1)
+            cstart, cend = _pdate(ch.start_date), _pdate(ch.deadline)
+            if cstart is None or cstart < min_start:
+                dur = (cend - cstart).days if (cstart and cend and cend >= cstart) else 0
+                ch.start_date = min_start.isoformat()
+                ch.deadline = (min_start + timedelta(days=max(dur, 0))).isoformat()
+                shifted.append(ch.id)
+            stack.append(ch.id)
+    if shifted:
+        db.commit()
+    return shifted
+
+
 def update_task(db: Session, task_id: int, **fields) -> dict:
     t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
     if not t:
         return {"ok": False, "msg": "任务不存在"}
-    for k in ("title", "description", "deliverable", "deadline", "priority", "status", "ai_note", "submission", "assignee"):
+    date_changed = False
+    for k in _EDITABLE_TASK_FIELDS:
         if fields.get(k) is not None:
             setattr(t, k, fields[k])
+            if k in ("start_date", "deadline"):
+                date_changed = True
+    db.commit()
+    shifted = _reschedule_from(db, t.project_id, t.id) if date_changed else []
+    return {"ok": True, "shifted": shifted}
+
+
+def add_task(db: Session, project_id: str, title: str, **fields) -> dict:
+    if not title or not title.strip():
+        return {"ok": False, "msg": "任务名不能为空"}
+    from sqlalchemy import func as _f
+    maxsort = db.query(_f.max(models.Task.sort_order)).filter(
+        models.Task.project_id == project_id).scalar() or 0
+    t = models.Task(project_id=project_id, title=title.strip(), assignee="employee",
+                    status="pending", priority="中", sort_order=maxsort + 1)
+    for k in _EDITABLE_TASK_FIELDS:
+        if fields.get(k) is not None:
+            setattr(t, k, fields[k])
+    db.add(t)
+    db.commit()
+    return {"ok": True, "id": t.id}
+
+
+def delete_task(db: Session, task_id: int) -> dict:
+    t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
+    if not t:
+        return {"ok": False, "msg": "任务不存在"}
+    # 依赖它的任务改为指向它的前置，避免依赖链断裂
+    for ch in db.query(models.Task).filter(models.Task.depends_on == t.id).all():
+        ch.depends_on = t.depends_on
+    db.delete(t)
     db.commit()
     return {"ok": True}
+
+
+def serialize_task_schedule(db: Session, project_id: str) -> dict:
+    """Boss 端排期编辑视图：按顺序返回全部任务（含开始/结束/依赖/负责人等可编辑字段）。"""
+    from datetime import date
+    rows = (db.query(models.Task).filter(models.Task.project_id == project_id)
+              .order_by(models.Task.sort_order, models.Task.id).all())
+    today = date.today().isoformat()
+    items = []
+    for t in rows:
+        d = _task_dict(t)
+        d["status_cn"] = _STATUS_CN.get(t.status, t.status)
+        d["overdue"] = bool(t.deadline) and t.deadline < today and t.status != "done"
+        items.append(d)
+    return {"tasks": items}
+
+
+# ============ 决策方案卡片（§3.6）============
+
+def create_proposal(db: Session, project_id: str, summary: str, conclusion: str = "",
+                    impact: str = "", option_a: str = "", option_b: str = "", option_c: str = "",
+                    recommend: str = "", decision: str = "") -> dict:
+    if not summary or not summary.strip():
+        return {"ok": False, "msg": "缺少问题摘要"}
+    p = models.Proposal(project_id=project_id, summary=summary.strip(), conclusion=conclusion,
+                        impact=impact, option_a=option_a, option_b=option_b, option_c=option_c,
+                        recommend=recommend, decision=decision, status="pending")
+    db.add(p)
+    db.commit()
+    return {"ok": True, "id": p.id}
+
+
+def _proposal_dict(p) -> dict:
+    return {
+        "id": p.id, "project_id": p.project_id, "summary": p.summary or "",
+        "conclusion": p.conclusion or "", "impact": p.impact or "",
+        "option_a": p.option_a or "", "option_b": p.option_b or "", "option_c": p.option_c or "",
+        "recommend": p.recommend or "", "decision": p.decision or "",
+        "status": p.status or "pending", "chosen": p.chosen or "", "result_note": p.result_note or "",
+        "created_at": p.created_at.isoformat() if p.created_at else "",
+    }
+
+
+def serialize_proposals(db: Session, project_id: str, only_pending: bool = True) -> dict:
+    rows = (db.query(models.Proposal).filter(models.Proposal.project_id == project_id)
+              .order_by(models.Proposal.id.desc()).all())
+    items = [_proposal_dict(p) for p in rows if (not only_pending or p.status == "pending")]
+    return {"proposals": items}
+
+
+def act_on_proposal(db: Session, proposal_id: int, action: str, chosen: str = "", note: str = "") -> dict:
+    """老板对决策卡片操作：confirm(选方案→转执行) / reject(驳回) / need_more(要求补充)。"""
+    p = db.query(models.Proposal).filter(models.Proposal.id == int(proposal_id)).first()
+    if not p:
+        return {"ok": False, "msg": "方案不存在"}
+    if p.status != "pending":
+        return {"ok": False, "msg": "该方案已处理"}
+
+    if action == "confirm":
+        opts = {"A": p.option_a, "B": p.option_b, "C": p.option_c}
+        p.chosen = (chosen or "A").upper()
+        chosen_text = opts.get(p.chosen) or p.option_a or p.recommend
+        p.status = "confirmed"
+        p.result_note = f"按{p.chosen}方案执行：{chosen_text}"
+        # 转成执行指令：给执行端建一条高优任务 + 留言
+        add_task(db, p.project_id, title=f"[决策执行] {p.summary[:18]}",
+                 background=p.summary, requirements=chosen_text, priority="高", status="pending")
+        db.add(models.Message(project_id=p.project_id, session_id="default", sender_id="ai_producer",
+                              content=f"诺亚：老板已拍板，按{p.chosen}方案执行——{chosen_text}。我已排进你的任务，按要求推进。",
+                              target_role="employee"))
+        db.commit()
+        return {"ok": True, "instruction": p.result_note}
+
+    if action == "reject":
+        p.status = "rejected"
+        p.result_note = note or "老板已驳回该方案"
+        db.commit()
+        return {"ok": True}
+
+    if action == "need_more":
+        p.status = "need_more"
+        p.result_note = note or "老板要求补充更多方案"
+        db.add(models.Message(project_id=p.project_id, session_id="default", sender_id="ai_producer",
+                              content=f"诺亚：收到，「{p.summary}」我再补充几个可选方案，稍后给你新的卡片。",
+                              target_role="boss"))
+        db.commit()
+        return {"ok": True}
+
+    return {"ok": False, "msg": "未知操作"}
 
 
 def submit_task(db: Session, task_id: int, note: str = "") -> dict:

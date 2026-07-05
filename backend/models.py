@@ -150,12 +150,40 @@ class Task(Base):
     assignee = Column(String, default="employee")  # 负责人（执行端）
     stage = Column(String, default="")
     deliverable = Column(String, default="")        # 交付标准/交付物
-    deadline = Column(String, default="")           # YYYY-MM-DD
+    start_date = Column(String, default="")          # 开始时间 YYYY-MM-DD（§1.3 周期编辑）
+    deadline = Column(String, default="")           # 截止/结束 YYYY-MM-DD
     priority = Column(String, default="中")          # 高/中/低
-    status = Column(String, default="pending")       # pending/in_progress/submitted/done/revision
+    status = Column(String, default="pending")       # pending/in_progress/submitted/done/revision/delayed
     ai_note = Column(String, default="")             # AI 项目经理修改意见
     submission = Column(String, default="")          # 员工提交说明
+    # —— §6 任务卡片全字段 ——
+    collaborators = Column(String, default="")       # 协作人
+    background = Column(String, default="")          # 任务背景
+    requirements = Column(String, default="")        # 任务要求
+    ref_material = Column(String, default="")        # 参考资料
+    depends_on = Column(Integer, nullable=True)      # 依赖的前置任务 id（§1.3 依赖/自动重排）
     sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=get_utc_8)
+
+    project = relationship("Project")
+
+
+class Proposal(Base):
+    """诺亚向老板提交的「决策方案卡片」（§3.6）：重大风险/方向问题时生成，老板可确认(选方案)/驳回/要求补充。"""
+    __tablename__ = "proposals"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"))
+    summary = Column(String, default="")       # 问题摘要
+    conclusion = Column(String, default="")    # 当前结论
+    impact = Column(String, default="")        # 影响判断
+    option_a = Column(String, default="")      # 方案A
+    option_b = Column(String, default="")      # 方案B
+    option_c = Column(String, default="")      # 方案C（可空）
+    recommend = Column(String, default="")     # 诺亚推荐（含理由，通常指向 A/B/C 之一）
+    decision = Column(String, default="")      # 需要决策事项
+    status = Column(String, default="pending") # pending/confirmed/rejected/need_more
+    chosen = Column(String, default="")        # 老板确认时选择的方案 A/B/C
+    result_note = Column(String, default="")   # 确认后诺亚转成的执行指令
     created_at = Column(DateTime(timezone=True), default=get_utc_8)
 
     project = relationship("Project")

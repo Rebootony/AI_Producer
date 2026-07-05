@@ -45,7 +45,7 @@ def init_db(db: Session):
     if not db.query(models.User).first():
         boss = models.User(id="boss", role="boss", name="创始人/老板")
         employee = models.User(id="employee", role="employee", name="执行团队/张导")
-        ai = models.User(id="ai_producer", role="ai", name="AI 制片")
+        ai = models.User(id="ai_producer", role="ai", name="诺亚")
         db.add_all([boss, employee, ai])
 
     project = db.query(models.Project).filter(models.Project.id == "p1").first()
@@ -115,7 +115,13 @@ def _migrate():
         for stmt in ["ALTER TABLE assets ADD COLUMN file_path VARCHAR",
                      "ALTER TABLE assets ADD COLUMN kind VARCHAR DEFAULT 'upload'",
                      "ALTER TABLE quote_items ADD COLUMN client_unit_price FLOAT DEFAULT 0",
-                     "ALTER TABLE quote_items ADD COLUMN is_locked INTEGER DEFAULT 0"]:
+                     "ALTER TABLE quote_items ADD COLUMN is_locked INTEGER DEFAULT 0",
+                     "ALTER TABLE tasks ADD COLUMN start_date VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN collaborators VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN background VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN requirements VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN ref_material VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN depends_on INTEGER"]:
             try:
                 conn.execute(text(stmt))
                 conn.commit()
@@ -470,6 +476,9 @@ class GenerateRequest(BaseModel):
 class MarginRequest(BaseModel):
     margin_rate: float
 
+class TaxRequest(BaseModel):
+    rate: float
+
 class QuoteItemUpdate(BaseModel):
     unit_price: Optional[float] = None
     qty_people: Optional[float] = None
@@ -587,6 +596,10 @@ def download_asset(project_id: str, asset_id: int, db: Session = Depends(get_db)
 def update_margin(project_id: str, req: MarginRequest, db: Session = Depends(get_db)):
     totals = quote_service.set_margin(db, project_id, req.margin_rate)
     return {"status": "ok", "totals": totals}
+
+@app.put("/api/projects/{project_id}/tax")
+def update_tax(project_id: str, req: TaxRequest, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.set_tax_rate(db, project_id, req.rate)}
 
 @app.put("/api/projects/{project_id}/quote/items/{item_id}")
 def update_quote_item_api(project_id: str, item_id: int, req: QuoteItemUpdate, db: Session = Depends(get_db)):
@@ -715,12 +728,64 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     ai_note: Optional[str] = None
     priority: Optional[str] = None
+    start_date: Optional[str] = None
     deadline: Optional[str] = None
     title: Optional[str] = None
+    description: Optional[str] = None
+    stage: Optional[str] = None
+    deliverable: Optional[str] = None
+    collaborators: Optional[str] = None
+    background: Optional[str] = None
+    requirements: Optional[str] = None
+    ref_material: Optional[str] = None
+    depends_on: Optional[int] = None
+
+class TaskCreate(BaseModel):
+    title: str = ""
+    stage: Optional[str] = None
+    start_date: Optional[str] = None
+    deadline: Optional[str] = None
+    priority: Optional[str] = None
+    deliverable: Optional[str] = None
+    depends_on: Optional[int] = None
+
+class ProposalReq(BaseModel):
+    summary: str = ""
+    conclusion: Optional[str] = ""
+    impact: Optional[str] = ""
+    option_a: Optional[str] = ""
+    option_b: Optional[str] = ""
+    option_c: Optional[str] = ""
+    recommend: Optional[str] = ""
+    decision: Optional[str] = ""
+
+class ProposalAct(BaseModel):
+    action: str = "confirm"      # confirm / reject / need_more
+    chosen: Optional[str] = ""   # A / B / C
+    note: Optional[str] = ""
 
 @app.get("/api/tasks")
 def list_tasks(assignee: str = "employee", db: Session = Depends(get_db)):
     return quote_service.serialize_tasks(db, assignee)
+
+@app.get("/api/projects/{project_id}/execution")
+def project_execution(project_id: str, db: Session = Depends(get_db)):
+    """Boss 端执行看板：项目进度 + 每个人当前在做什么。"""
+    return quote_service.serialize_execution(db, project_id)
+
+@app.get("/api/projects/{project_id}/task-schedule")
+def project_task_schedule(project_id: str, db: Session = Depends(get_db)):
+    """Boss 端排期编辑视图：全部任务（含开始/结束/依赖），与 /schedule(只读时间线) 区分。"""
+    return quote_service.serialize_task_schedule(db, project_id)
+
+@app.post("/api/projects/{project_id}/tasks")
+def add_task_api(project_id: str, req: TaskCreate, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.add_task(
+        db, project_id, **req.dict(exclude_none=True))}
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task_api(task_id: int, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.delete_task(db, task_id)}
 
 @app.post("/api/tasks/{task_id}/submit")
 def submit_task_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):
@@ -733,8 +798,21 @@ def task_feedback_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)
 @app.put("/api/tasks/{task_id}")
 def update_task_api(task_id: int, req: TaskUpdate, db: Session = Depends(get_db)):
     return {"status": "ok", "result": quote_service.update_task(
-        db, task_id, status=req.status, ai_note=req.ai_note, priority=req.priority,
-        deadline=req.deadline, title=req.title)}
+        db, task_id, **req.dict(exclude_none=True))}
+
+# —— 决策方案卡片（§3.6）——
+@app.get("/api/projects/{project_id}/proposals")
+def list_proposals_api(project_id: str, only_pending: bool = True, db: Session = Depends(get_db)):
+    return quote_service.serialize_proposals(db, project_id, only_pending)
+
+@app.post("/api/projects/{project_id}/proposals")
+def create_proposal_api(project_id: str, req: ProposalReq, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.create_proposal(db, project_id, **req.dict())}
+
+@app.post("/api/proposals/{proposal_id}/act")
+def act_proposal_api(proposal_id: int, req: ProposalAct, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.act_on_proposal(
+        db, proposal_id, req.action, req.chosen or "", req.note or "")}
 
 class TeamMemberReq(BaseModel):
     name: str = "新成员"

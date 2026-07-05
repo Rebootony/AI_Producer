@@ -117,7 +117,7 @@ const initialTeam: TeamMember[] = [
   { id: 't3', name: '李制片', role: '执行制片', department: 'management', status: 'online', currentTask: '协调拍摄场地与器材', avatar: 'https://ui-avatars.com/api/?name=李&background=10B981&color=fff', projectIds: ['p1', 'p2', 'p3'] },
   { id: 't4', name: '王摄影', role: '摄影指导 (DP)', department: 'execution', status: 'offline', avatar: 'https://ui-avatars.com/api/?name=王&background=6366F1&color=fff', projectIds: ['p1'] },
   { id: 't5', name: '赵剪辑', role: '后期剪辑', department: 'execution', status: 'busy', currentTask: '剪辑蔚来TVC初版', avatar: 'https://ui-avatars.com/api/?name=赵&background=8B5CF6&color=fff', projectIds: ['p2', 'p3'] },
-  { id: 't6', name: 'AI 制片', role: '智能统筹', department: 'management', status: 'online', currentTask: '全局监控 & 风险预警', avatar: 'https://ui-avatars.com/api/?name=AI&background=2563EB&color=fff', projectIds: ['p1', 'p2', 'p3'] }
+  { id: 't6', name: '诺亚', role: 'AI 项目经理', department: 'management', status: 'online', currentTask: '全局监控 & 风险预警', avatar: 'https://ui-avatars.com/api/?name=诺&background=2563EB&color=fff', projectIds: ['p1', 'p2', 'p3'] }
 ];
 
 export const useStore = create<AppState>((set) => ({

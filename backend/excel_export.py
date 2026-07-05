@@ -90,14 +90,19 @@ def build_quote_xlsx(db, project_id: str, version: str = "client") -> bytes:
 
     r += 1
     last_col = ncol
+    _txr = round(totals.get("tax_rate", 0) * 100)
+    _pretax = totals.get("client_price", 0)
+    _withtax = totals.get("client_price_tax", _pretax)
     if internal:
         summary = [
             ("成本核算（明细合计）", totals.get("cost_total", 0)),
             (f"利润（{round(totals.get('margin_rate', 0.25) * 100)}%）", totals.get("profit", 0)),
-            ("对客户实收（含税）", totals.get("client_price", 0)),
+            ("对客户实收（不含税）", _pretax),
+            (f"税额（税点 {_txr}%）", round(_withtax - _pretax, 2)),
+            ("对客户实收（含税）", _withtax),
         ]
     else:
-        summary = [("合计（含税）", totals.get("client_price", 0))]
+        summary = [(f"合计（含税 {_txr}%）", _withtax)]
     for label, val in summary:
         ws.cell(row=r, column=last_col - 1, value=label).font = _BOLD
         ws.cell(row=r, column=last_col, value=val).font = _BOLD

@@ -9,7 +9,7 @@ interface QuoteItem {
   amount: number; is_overrun: boolean; note: string;
   client_unit_price: number; client_amount: number; profit: number; gross_margin: number; is_locked: boolean;
 }
-interface Totals { cost_total: number; tax_rate: number; margin_rate: number; profit: number; client_price: number; gross_margin: number; }
+interface Totals { cost_total: number; tax_rate: number; margin_rate: number; profit: number; client_price: number; gross_margin: number; tax?: number; client_price_tax?: number; }
 interface QuoteData { generated: boolean; film_type: string; duration_minutes: number; shoot_days: number; items: QuoteItem[]; totals: Totals; }
 
 const yuan = (n: number) => '¥ ' + Math.round(n).toLocaleString();
@@ -94,6 +94,12 @@ export function BudgetTab({ project }: { project: Project }) {
   };
   const [targetPrice, setTargetPrice] = useState('');
   const [targetMargin, setTargetMargin] = useState('');
+  const [taxInput, setTaxInput] = useState('');
+  const applyTax = async (rate: number) => {
+    lastUserTs.current = Date.now();
+    await fetch(`/api/projects/${project.id}/tax`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rate }) });
+    setTaxInput(''); lastUserTs.current = 0; await fetchQuote();
+  };
   const applyTarget = async (body: any) => {
     lastUserTs.current = Date.now();
     const res = await fetch(`/api/projects/${project.id}/quote/target`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -107,7 +113,7 @@ export function BudgetTab({ project }: { project: Project }) {
       <div className="p-8 max-w-3xl mx-auto">
         <GenerationOverlay open={genOpen} projectName={project.name} totalMs={genMs} />
         <h2 className="text-2xl font-bold text-zinc-900 mb-2">预算控制 · 报价单</h2>
-        <p className="text-zinc-500 mb-8">基于客户 Brief 与价格单，由 AI 制片一键生成。</p>
+        <p className="text-zinc-500 mb-8">基于客户 Brief 与价格单，由项目经理诺亚一键生成。</p>
         <div className="bg-white rounded-2xl border border-dashed border-zinc-300 p-12 text-center">
           <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-5"><Wand2 size={26} /></div>
           <h3 className="text-lg font-semibold text-zinc-900 mb-2">还没有报价单</h3>
@@ -125,6 +131,8 @@ export function BudgetTab({ project }: { project: Project }) {
   const clientTotal = data.items.reduce((s, it) => s + it.client_amount, 0);
   const profit = clientTotal - cost;
   const overallGm = clientTotal ? profit / clientTotal : 0;
+  const taxRate = data.totals.tax_rate || 0;
+  const clientTaxTotal = clientTotal * (1 + taxRate);   // 含税报价 = 不含税 ×(1+税点)
   const clientSub = (ph: string) => data.items.filter((i) => i.phase === ph).reduce((s, it) => s + it.client_amount, 0);
 
   return (
@@ -156,11 +164,11 @@ export function BudgetTab({ project }: { project: Project }) {
             <p className="text-[11px] text-zinc-400 mt-1.5">只调未锁定项 · 锁定项不动</p>
           </div>
           <Card label="毛利额" value={yuan(profit)} sub={`整体毛利率 ${pct(overallGm)}`} accent="green" />
-          <Card label="对客户实收" value={yuan(clientTotal)} sub="= 各明细之和" accent="blue" />
+          <Card label="对客户实收（不含税）" value={yuan(clientTotal)} sub={`含税 ${yuan(clientTaxTotal)} · 税点 ${(taxRate * 100).toFixed(0)}%`} accent="blue" />
         </div>
       ) : (
         <div className="bg-blue-600 p-6 rounded-2xl shadow-sm text-white mb-6 flex items-center justify-between">
-          <div><p className="text-sm font-medium text-blue-100 mb-1">报价合计（含税）</p><h3 className="text-3xl font-bold">{yuan(clientTotal)}</h3></div>
+          <div><p className="text-sm font-medium text-blue-100 mb-1">报价合计（含税 {(taxRate * 100).toFixed(0)}%）</p><h3 className="text-3xl font-bold">{yuan(clientTaxTotal)}</h3></div>
           <p className="text-xs text-blue-100 max-w-[200px] text-right">给客户的版本：报价已含服务费，不展示成本与利润。</p>
         </div>
       )}
@@ -180,7 +188,13 @@ export function BudgetTab({ project }: { project: Project }) {
           <span className="text-zinc-400 -ml-1">%</span>
           <button onClick={() => targetMargin && applyTarget({ target_margin: Number(targetMargin) / 100 })}
             className="px-3 py-1 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">按毛利率反推</button>
-          <span className="text-[11px] text-zinc-400 ml-auto">只调整未锁定项</span>
+          <span className="w-px h-5 bg-zinc-200 mx-1" />
+          <span className="text-zinc-400">税点</span>
+          <input value={taxInput} onChange={(e) => setTaxInput(e.target.value)} placeholder={(taxRate * 100).toFixed(0)} type="number"
+            className="w-14 px-2 py-1 border border-zinc-200 rounded-lg outline-none focus:border-blue-400" />
+          <span className="text-zinc-400 -ml-1">%</span>
+          <button onClick={() => taxInput !== '' && applyTax(Number(taxInput) / 100)}
+            className="px-3 py-1 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50">应用</button>
         </div>
       )}
 
@@ -262,7 +276,8 @@ export function BudgetTab({ project }: { project: Project }) {
               <div className="flex justify-between"><span className="text-zinc-500">成本小计</span><span className="font-medium text-zinc-900">{yuan(cost)}</span></div>
               <div className="flex justify-between"><span className="text-zinc-500">毛利额（毛利率 {pct(overallGm)}）</span><span className="font-medium text-green-600">+ {yuan(profit)}</span></div>
             </>}
-            <div className="flex justify-between border-t border-zinc-300 pt-1.5 mt-1.5"><span className="font-semibold text-zinc-900">{internal ? '对客户实收（含税）' : '报价合计（含税）'}</span><span className="font-bold text-blue-600 text-base">{yuan(clientTotal)}</span></div>
+            <div className="flex justify-between text-xs text-zinc-400"><span>不含税实收 {yuan(clientTotal)}</span><span>税点 {(taxRate * 100).toFixed(0)}% · 税额 {yuan(clientTaxTotal - clientTotal)}</span></div>
+            <div className="flex justify-between border-t border-zinc-300 pt-1.5 mt-1.5"><span className="font-semibold text-zinc-900">{internal ? '对客户实收（含税）' : '报价合计（含税）'}</span><span className="font-bold text-blue-600 text-base">{yuan(clientTaxTotal)}</span></div>
           </div>
         </div>
       </div>

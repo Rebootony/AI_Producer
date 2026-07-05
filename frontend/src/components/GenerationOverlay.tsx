@@ -43,7 +43,7 @@ export function GenerationOverlay({ open, projectName, totalMs }: { open: boolea
             <Bot size={22} />
           </div>
           <div>
-            <h3 className="font-semibold text-zinc-900">AI 项目经理正在工作…</h3>
+            <h3 className="font-semibold text-zinc-900">诺亚正在工作…</h3>
             <p className="text-xs text-zinc-400">{projectName ? `项目：${projectName}` : '正在分析并生成方案'}</p>
           </div>
         </div>

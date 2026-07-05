@@ -94,7 +94,7 @@ def compute_totals(items: list, tax_rate: float = 0.01, margin_rate: float = 0.2
         client_total += cl_amt
         subtotals[ph] = subtotals.get(ph, 0.0) + cost_amt
         client_subtotals[ph] = client_subtotals.get(ph, 0.0) + cl_amt
-    tax = cost_total * tax_rate
+    tax = client_total * tax_rate            # 税点按对客户实收(不含税)计
     profit = client_total - cost_total
     return {
         "cost_total": round(cost_total, 2),
@@ -102,7 +102,8 @@ def compute_totals(items: list, tax_rate: float = 0.01, margin_rate: float = 0.2
         "tax": round(tax, 2),
         "margin_rate": margin_rate,
         "profit": round(profit, 2),
-        "client_price": round(client_total, 2),
+        "client_price": round(client_total, 2),                       # 不含税实收(=各明细之和,自洽)
+        "client_price_tax": round(client_total * (1 + tax_rate), 2),  # 含税报价 = 不含税 ×(1+税点)
         "gross_margin": round(profit / client_total, 4) if client_total else 0.0,  # 整体毛利率=毛利/营收
         "subtotals": {k: round(v, 2) for k, v in subtotals.items()},
         "client_subtotals": {k: round(v, 2) for k, v in client_subtotals.items()},

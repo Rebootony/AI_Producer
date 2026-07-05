@@ -43,7 +43,7 @@ export function Dashboard() {
       <div className="max-w-6xl mx-auto animate-in fade-in duration-500">
         <div className="mb-10">
           <h1 className="text-3xl font-bold text-zinc-900">全局项目大盘</h1>
-          <p className="text-zinc-500 mt-2">AI 制片协助同时管理多个项目的报价、排期与利润。</p>
+          <p className="text-zinc-500 mt-2">项目经理诺亚为你统筹多个项目的报价、排期、进度与利润。</p>
         </div>
 
         <div className="grid grid-cols-4 gap-6 mb-10">

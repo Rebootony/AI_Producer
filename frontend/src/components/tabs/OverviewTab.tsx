@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Target, Clock, DollarSign, Building, Wand2, Loader2, CheckCircle2, FileText, Upload, Save, Pencil } from 'lucide-react';
 import { Project, useStore } from '../../store/useStore';
 import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
+import { ExecutionBoard } from '../ExecutionBoard';
+import { ProposalCards } from '../ProposalCards';
 
 interface BackendProject {
   id: string; name: string; client: string; industry: string; goal: string;
@@ -117,7 +119,7 @@ export function OverviewTab({ project }: { project: Project }) {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">{p?.name || project.name}</h1>
-          <p className="text-zinc-500 mt-2">基于客户 Brief 由 AI 制片智能提取与核算</p>
+          <p className="text-zinc-500 mt-2">基于客户 Brief 由项目经理诺亚智能提取与核算</p>
         </div>
         <span className={`text-xs px-3 py-1.5 rounded-full font-medium ${generated ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
           {generated ? '已生成报价 + 排期' : '待生成'}
@@ -154,6 +156,12 @@ export function OverviewTab({ project }: { project: Project }) {
         <Card icon={<Target size={24} />} color="purple" label="核心目标"
           main={goalMain} sub={goalSub} />
       </div>
+
+      {/* 诺亚推来的决策方案卡片（仅老板，确认/驳回/要求补充） */}
+      {isBoss && <ProposalCards projectId={project.id} />}
+
+      {/* 执行动态：每个人当前在做什么 + 项目完成率（仅老板可见，随执行端提交自动同步） */}
+      {generated && isBoss && <ExecutionBoard projectId={project.id} />}
 
       {/* Brief：可编辑 + 上传 */}
       <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">

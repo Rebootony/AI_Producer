@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { cn } from '../../utils';
 import { Project, useStore } from '../../store/useStore';
-import { CheckCircle2, Wand2, Loader2, Star, Users, Flag, Download } from 'lucide-react';
+import { CheckCircle2, Wand2, Loader2, Star, Users, Flag, Download, List, Pencil } from 'lucide-react';
 import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
+import { ScheduleEditor } from '../ScheduleEditor';
 
 interface SchedItem {
   id: number; stage: string; task: string; start_date: string; end_date: string;
@@ -20,6 +21,7 @@ const stageColor: Record<string, string> = {
 export function TimelineTab({ project }: { project: Project }) {
   const [data, setData] = useState<SchedData | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
   const isBoss = useStore(s => s.currentUser?.role === 'boss');
 
   const fetchSchedule = useCallback(async () => {
@@ -87,12 +89,24 @@ export function TimelineTab({ project }: { project: Project }) {
           <h2 className="text-2xl font-bold text-zinc-900">执行排期</h2>
           <p className="text-zinc-500 mt-2">交付日 {data.delivery_date}（倒推）· 拍摄 {data.shoot_days} 天 · 进度 {pct}%</p>
         </div>
-        <a href={`/api/projects/${project.id}/schedule.xlsx`}
-          className="text-sm px-4 py-2 rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50 inline-flex items-center">
-          <Download size={15} className="mr-1.5" />下载排期 Excel
-        </a>
+        <div className="flex items-center gap-2">
+          {isBoss && (
+            <div className="flex items-center bg-zinc-100 rounded-lg p-0.5">
+              <button onClick={() => setMode('view')} className={`px-3 py-1.5 rounded-md text-sm inline-flex items-center ${mode === 'view' ? 'bg-white shadow-sm text-zinc-900 font-medium' : 'text-zinc-500'}`}><List size={14} className="mr-1.5" />时间线</button>
+              <button onClick={() => setMode('edit')} className={`px-3 py-1.5 rounded-md text-sm inline-flex items-center ${mode === 'edit' ? 'bg-white shadow-sm text-zinc-900 font-medium' : 'text-zinc-500'}`}><Pencil size={14} className="mr-1.5" />编辑排期</button>
+            </div>
+          )}
+          <a href={`/api/projects/${project.id}/schedule.xlsx`}
+            className="text-sm px-4 py-2 rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50 inline-flex items-center">
+            <Download size={15} className="mr-1.5" />下载 Excel
+          </a>
+        </div>
       </div>
 
+      {isBoss && mode === 'edit' ? (
+        <ScheduleEditor projectId={project.id} />
+      ) : (
+      <>
       <div className="flex items-center gap-4 mb-8 text-xs text-zinc-500">
         <span className="flex items-center"><Star size={13} className="mr-1 text-amber-500" />关键节点（锁定）</span>
         <span className="flex items-center"><Users size={13} className="mr-1 text-rose-500" />需客户配合</span>
@@ -137,6 +151,8 @@ export function TimelineTab({ project }: { project: Project }) {
         ))}
       </div>
       <p className="text-xs text-zinc-400 mt-4 ml-3">提示：可在对话里让 AI 调整，如「拍摄加一天」会同时影响排期与 B 段报价（关键节点变更需二次确认）。</p>
+      </>
+      )}
     </div>
   );
 }

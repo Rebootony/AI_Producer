@@ -61,7 +61,18 @@
       "Bash(curl -s -X PUT http://127.0.0.1:8000/api/projects/p1/margin -H 'Content-Type: application/json' -d '{\"margin_rate\":0.25}')",
       "Bash(python3 -c \"import sys,json;print\\('  ',[p['id']+':'+p['name'] for p in json.load\\(sys.stdin\\)['projects']]\\)\")",
       "Read(//Users/bytedance/Documents/Github/**)",
-      "Bash(grep -i \"\\\\.db$\")"
+      "Bash(grep -i \"\\\\.db$\")",
+      "Bash(cd /Users/bytedance/Documents/Github/AI_Producer/backend *)",
+      "Bash(./venv/bin/python -)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8000/)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/chat -H 'Content-Type: application/json' -d '{\"message\":\"利润率是不是偏低\",\"user_id\":\"boss\",\"role\":\"boss\",\"project_id\":\"p1\",\"session_id\":\"_sk\"}' --max-time 30)",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/projects/p1/schedule\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/projects/p1/task-schedule\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/openapi.json\")",
+      "Bash(python3 -c ' *)",
+      "Bash(./venv/bin/python -c ' *)",
+      "Bash(timeout 300 ./venv/bin/python _fulltest.py)",
+      "Bash(npm run *)"
     ]
   }
 }
