@@ -382,6 +382,8 @@ def _task_dict(t, project_name=""):
         "collaborators": t.collaborators or "", "background": t.background or "",
         "requirements": t.requirements or "", "ref_material": t.ref_material or "",
         "depends_on": t.depends_on,
+        "has_file": bool(t.submission_file), "submission_filename": t.submission_filename or "",
+        "submitted_at": t.submitted_at or "", "submitter": t.submitter or "",
     }
 
 
@@ -539,6 +541,46 @@ def delete_task(db: Session, task_id: int) -> dict:
     return {"ok": True}
 
 
+def move_task(db: Session, task_id: int, direction: str) -> dict:
+    """排期任务上移/下移（§1）：规整 sort_order 后与相邻任务交换。"""
+    t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
+    if not t:
+        return {"ok": False, "msg": "任务不存在"}
+    rows = (db.query(models.Task).filter(models.Task.project_id == t.project_id)
+              .order_by(models.Task.sort_order, models.Task.id).all())
+    idx = next((i for i, r in enumerate(rows) if r.id == t.id), -1)
+    j = idx - 1 if direction == "up" else idx + 1
+    if idx < 0 or j < 0 or j >= len(rows):
+        return {"ok": False, "msg": "已到边界"}
+    for k, r in enumerate(rows):
+        r.sort_order = k
+    rows[idx].sort_order, rows[j].sort_order = rows[j].sort_order, rows[idx].sort_order
+    db.commit()
+    return {"ok": True}
+
+
+_PHASE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3}
+
+def move_quote_item(db: Session, project_id: str, item_id: int, direction: str) -> dict:
+    """预算明细在【同一阶段内】上移/下移（§1）：先按阶段规整全局 sort_order，再交换同阶段相邻项。"""
+    it = db.query(models.QuoteItem).filter(
+        models.QuoteItem.id == int(item_id), models.QuoteItem.project_id == project_id).first()
+    if not it:
+        return {"ok": False, "msg": "报价项不存在"}
+    allrows = db.query(models.QuoteItem).filter(models.QuoteItem.project_id == project_id).all()
+    allrows.sort(key=lambda r: (_PHASE_ORDER.get(r.phase, 9), r.sort_order, r.id))
+    for k, r in enumerate(allrows):
+        r.sort_order = k
+    sibs = [r for r in allrows if r.phase == it.phase]
+    idx = next((i for i, r in enumerate(sibs) if r.id == it.id), -1)
+    j = idx - 1 if direction == "up" else idx + 1
+    if idx < 0 or j < 0 or j >= len(sibs):
+        return {"ok": False, "msg": "已到边界"}
+    sibs[idx].sort_order, sibs[j].sort_order = sibs[j].sort_order, sibs[idx].sort_order
+    db.commit()
+    return {"ok": True}
+
+
 def serialize_task_schedule(db: Session, project_id: str) -> dict:
     """Boss 端排期编辑视图：按顺序返回全部任务（含开始/结束/依赖/负责人等可编辑字段）。"""
     from datetime import date
@@ -628,18 +670,58 @@ def act_on_proposal(db: Session, proposal_id: int, action: str, chosen: str = ""
     return {"ok": False, "msg": "未知操作"}
 
 
-def submit_task(db: Session, task_id: int, note: str = "") -> dict:
-    """执行端提交成果：状态→已提交，并给老板/项目经理留一条消息。"""
+def _now_str():
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+
+
+def submit_task(db: Session, task_id: int, note: str = "", filename: str = "",
+                file_path: str = "", submitter: str = "张导") -> dict:
+    """执行端提交成果：状态→已提交(待审核，不直接完成)，可带成果文件；给老板留一条消息。"""
     t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
     if not t:
         return {"ok": False, "msg": "任务不存在"}
-    t.status = "submitted"
+    t.status = "submitted"            # 上传成果 ≠ 完成：进入待审核
     t.submission = note or "已提交"
-    msg = f'张导提交了「{t.title}」：{note or "已完成，请查收"}'
+    t.submitter = submitter
+    t.submitted_at = _now_str()
+    if file_path:
+        t.submission_file = file_path
+        t.submission_filename = filename or "成果文件"
+    file_tip = f"（附件：{t.submission_filename}）" if t.submission_file else ""
+    msg = f'{submitter}提交了「{t.title}」待你审核{file_tip}：{note or "请查收"}'
     db.add(models.Message(project_id=t.project_id, session_id="default",
                           sender_id="ai_producer", content=msg, target_role="boss"))
     db.commit()
     return {"ok": True, "title": t.title}
+
+
+def approve_task(db: Session, task_id: int) -> dict:
+    """老板审核通过：任务→已完成，执行端同步；给执行端留一条消息。"""
+    t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
+    if not t:
+        return {"ok": False, "msg": "任务不存在"}
+    t.status = "done"
+    t.ai_note = ""   # 通过后清掉旧的退回意见
+    db.add(models.Message(project_id=t.project_id, session_id="default", sender_id="ai_producer",
+                          content=f'诺亚已确认通过「{t.title}」，进入下一节点。', target_role="employee"))
+    db.commit()
+    return {"ok": True}
+
+
+def reject_task(db: Session, task_id: int, reason: str) -> dict:
+    """老板退回：必须填修改意见；任务→需修改，执行端同步显示退回原因。"""
+    if not reason or not reason.strip():
+        return {"ok": False, "msg": "退回必须填写修改意见"}
+    t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
+    if not t:
+        return {"ok": False, "msg": "任务不存在"}
+    t.status = "revision"
+    t.ai_note = reason.strip()
+    db.add(models.Message(project_id=t.project_id, session_id="default", sender_id="ai_producer",
+                          content=f'诺亚已退回「{t.title}」，需修改：{reason.strip()}', target_role="employee"))
+    db.commit()
+    return {"ok": True}
 
 
 def task_feedback(db: Session, task_id: int, note: str) -> dict:

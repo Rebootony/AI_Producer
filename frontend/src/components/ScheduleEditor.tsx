@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, Loader2, AlertTriangle, Zap } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertTriangle, Zap, ChevronUp, ChevronDown } from 'lucide-react';
+
+const STAGE_OPTS = ['前期', '中期', '后期', '交付'];
 
 interface Row {
   id: number; title: string; stage: string; assignee: string;
@@ -59,6 +61,10 @@ export function ScheduleEditor({ projectId }: { projectId: string }) {
     await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     await fetchRows();
   };
+  const move = async (id: number, direction: 'up' | 'down') => {
+    await fetch(`/api/tasks/${id}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) });
+    await fetchRows();
+  };
 
   const titleById = (id: number | null) => rows.find(r => r.id === id)?.title || '无';
 
@@ -94,7 +100,12 @@ export function ScheduleEditor({ projectId }: { projectId: string }) {
                     onBlur={e => save(r.id, { title: e.target.value })}
                     className="w-full bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 outline-none" />
                 </td>
-                <td className="px-3 py-2 text-zinc-500 whitespace-nowrap">{r.stage || '—'}</td>
+                <td className="px-3 py-2">
+                  <select value={r.stage || '前期'} onChange={(e) => save(r.id, { stage: e.target.value })}
+                    className="bg-transparent border border-zinc-200 rounded px-1.5 py-1 text-xs outline-none focus:border-blue-400">
+                    {[...new Set([...STAGE_OPTS, r.stage].filter(Boolean))].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </td>
                 <td className="px-3 py-2 min-w-[90px]">
                   <input value={r.assignee} onChange={e => setRows(rs => rs.map(x => x.id === r.id ? { ...x, assignee: e.target.value } : x))}
                     onBlur={e => save(r.id, { assignee: e.target.value })}
@@ -132,9 +143,11 @@ export function ScheduleEditor({ projectId }: { projectId: string }) {
                   </select>
                 </td>
                 <td className="px-3 py-2">
-                  <button onClick={() => delRow(r.id)} className="text-zinc-400 hover:text-red-500 p-1 rounded hover:bg-red-50">
-                    <Trash2 size={15} />
-                  </button>
+                  <div className="flex items-center gap-0.5">
+                    <button onClick={() => move(r.id, 'up')} title="上移" className="text-zinc-400 hover:text-zinc-700 p-1 rounded hover:bg-zinc-100"><ChevronUp size={14} /></button>
+                    <button onClick={() => move(r.id, 'down')} title="下移" className="text-zinc-400 hover:text-zinc-700 p-1 rounded hover:bg-zinc-100"><ChevronDown size={14} /></button>
+                    <button onClick={() => delRow(r.id)} title="删除" className="text-zinc-400 hover:text-red-500 p-1 rounded hover:bg-red-50"><Trash2 size={15} /></button>
+                  </div>
                 </td>
               </tr>
             ))}

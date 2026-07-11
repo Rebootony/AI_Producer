@@ -10,7 +10,7 @@ import { Bell, Settings, ClipboardList, MessageSquare } from 'lucide-react';
 import { useStore } from './store/useStore';
 
 function App() {
-  const { view, currentProjectId, projects, currentUser, logout } = useStore();
+  const { view, currentProjectId, projects, currentUser } = useStore();
   const currentProject = projects.find(p => p.id === currentProjectId);
   const inProject = view !== 'dashboard' && !!currentProject;
   const [chatOpen, setChatOpen] = useState(true);
@@ -35,9 +35,7 @@ function App() {
             <MessageSquare size={14} className="mr-1.5" />对话
           </button>
           <div className="ml-auto flex items-center gap-3 pr-1">
-            <span className="text-sm text-zinc-300">{currentUser.name}</span>
-            <img src={currentUser.avatar} alt="" onClick={() => logout()} title="点击退出登录"
-              className="w-8 h-8 rounded-full cursor-pointer border-2 border-zinc-700 hover:border-zinc-500" />
+            <IdentityBadge />
           </div>
         </header>
         <main className="flex-1 flex overflow-hidden">
@@ -96,6 +94,7 @@ function App() {
           <button className="text-zinc-400 hover:text-white transition-colors">
             <Settings size={18} />
           </button>
+          <IdentityBadge />
         </div>
       </header>
 
@@ -124,6 +123,33 @@ function App() {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+// 用户名｜身份 展示 + 多身份切换（§10 / §11）
+function IdentityBadge() {
+  const { currentUser, switchIdentity, logout } = useStore();
+  if (!currentUser) return null;
+  const multi = (currentUser.identities?.length || 0) > 1;
+  return (
+    <div className="flex items-center gap-2">
+      {multi && currentUser.identities ? (
+        <select
+          value={currentUser.title}
+          onChange={(e) => switchIdentity(e.target.value)}
+          title="切换身份视角"
+          className="text-sm rounded-lg px-2 py-1 outline-none bg-zinc-800 text-zinc-100 border border-zinc-700 hover:border-zinc-500 cursor-pointer"
+        >
+          {currentUser.identities.map((i) => (
+            <option key={i.title} value={i.title}>{currentUser.name}｜{i.title}</option>
+          ))}
+        </select>
+      ) : (
+        <span className="text-sm text-zinc-200">{currentUser.name}｜{currentUser.title}</span>
+      )}
+      <img src={currentUser.avatar} alt="" onClick={() => logout()} title="点击退出登录"
+        className="w-8 h-8 rounded-full cursor-pointer border-2 border-zinc-700 hover:border-zinc-500" />
     </div>
   );
 }

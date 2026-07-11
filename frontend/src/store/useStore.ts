@@ -3,11 +3,18 @@ import { create } from 'zustand';
 export type TabType = 'overview' | 'timeline' | 'budget' | 'assets' | 'team';
 export type ViewType = 'dashboard' | 'project_dashboard' | 'project_chat';
 
+export interface Identity {
+  role: 'boss' | 'employee';
+  title: string;               // 身份名：老板 / 导演 / 剪辑 …
+}
+
 export interface CurrentUser {
   id: string;
-  name: string;
-  role: 'boss' | 'employee';
+  name: string;                // 正式用户名，如 张子雄
+  role: 'boss' | 'employee';   // 当前身份对应的视图权限
   avatar: string;
+  title?: string;              // 当前身份名
+  identities?: Identity[];     // 该账号绑定的全部身份（多身份可切换）
 }
 
 export interface TeamMember {
@@ -52,6 +59,7 @@ interface AppState {
   currentUser: CurrentUser | null;
   login: (user: CurrentUser) => void;
   logout: () => void;
+  switchIdentity: (title: string) => void;
 
   view: ViewType;
   setView: (view: ViewType) => void;
@@ -117,13 +125,19 @@ const initialTeam: TeamMember[] = [
   { id: 't3', name: '李制片', role: '执行制片', department: 'management', status: 'online', currentTask: '协调拍摄场地与器材', avatar: 'https://ui-avatars.com/api/?name=李&background=10B981&color=fff', projectIds: ['p1', 'p2', 'p3'] },
   { id: 't4', name: '王摄影', role: '摄影指导 (DP)', department: 'execution', status: 'offline', avatar: 'https://ui-avatars.com/api/?name=王&background=6366F1&color=fff', projectIds: ['p1'] },
   { id: 't5', name: '赵剪辑', role: '后期剪辑', department: 'execution', status: 'busy', currentTask: '剪辑蔚来TVC初版', avatar: 'https://ui-avatars.com/api/?name=赵&background=8B5CF6&color=fff', projectIds: ['p2', 'p3'] },
-  { id: 't6', name: '诺亚', role: 'AI 项目经理', department: 'management', status: 'online', currentTask: '全局监控 & 风险预警', avatar: 'https://ui-avatars.com/api/?name=诺&background=2563EB&color=fff', projectIds: ['p1', 'p2', 'p3'] }
+  { id: 't6', name: '诺亚', role: '项目经理', department: 'management', status: 'online', currentTask: '全局监控 & 风险预警', avatar: 'https://ui-avatars.com/api/?name=诺&background=2563EB&color=fff', projectIds: ['p1', 'p2', 'p3'] }
 ];
 
 export const useStore = create<AppState>((set) => ({
   currentUser: null,
   login: (user) => set({ currentUser: user }),
   logout: () => set({ currentUser: null, view: 'dashboard' }),
+  switchIdentity: (title) => set((s) => {
+    const u = s.currentUser;
+    const id = u?.identities?.find((i) => i.title === title);
+    if (!u || !id) return {};
+    return { currentUser: { ...u, role: id.role, title: id.title }, view: 'dashboard', currentProjectId: null };
+  }),
 
   view: 'dashboard',
   setView: (view) => set({ view }),

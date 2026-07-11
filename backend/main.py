@@ -121,7 +121,11 @@ def _migrate():
                      "ALTER TABLE tasks ADD COLUMN background VARCHAR DEFAULT ''",
                      "ALTER TABLE tasks ADD COLUMN requirements VARCHAR DEFAULT ''",
                      "ALTER TABLE tasks ADD COLUMN ref_material VARCHAR DEFAULT ''",
-                     "ALTER TABLE tasks ADD COLUMN depends_on INTEGER"]:
+                     "ALTER TABLE tasks ADD COLUMN depends_on INTEGER",
+                     "ALTER TABLE tasks ADD COLUMN submission_file VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN submission_filename VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN submitted_at VARCHAR DEFAULT ''",
+                     "ALTER TABLE tasks ADD COLUMN submitter VARCHAR DEFAULT ''"]:
             try:
                 conn.execute(text(stmt))
                 conn.commit()
@@ -787,9 +791,52 @@ def add_task_api(project_id: str, req: TaskCreate, db: Session = Depends(get_db)
 def delete_task_api(task_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", "result": quote_service.delete_task(db, task_id)}
 
+class MoveReq(BaseModel):
+    direction: str = "up"   # up / down
+
+@app.post("/api/tasks/{task_id}/move")
+def move_task_api(task_id: int, req: MoveReq, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.move_task(db, task_id, req.direction)}
+
+@app.post("/api/projects/{project_id}/quote/items/{item_id}/move")
+def move_quote_item_api(project_id: str, item_id: int, req: MoveReq, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.move_quote_item(db, project_id, item_id, req.direction)}
+
 @app.post("/api/tasks/{task_id}/submit")
 def submit_task_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):
     return {"status": "ok", "result": quote_service.submit_task(db, task_id, req.note)}
+
+@app.post("/api/tasks/{task_id}/upload")
+async def upload_task_result(task_id: int, file: UploadFile = File(...),
+                             note: str = "", submitter: str = "张导", db: Session = Depends(get_db)):
+    """执行端上传成果文件 → 进入待审核（上传≠完成）。文件同时归档到项目资产。"""
+    t = db.query(models.Task).filter(models.Task.id == task_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    raw = await file.read()
+    path = _save_upload(t.project_id, file.filename or "成果文件", raw)
+    ext = (file.filename.rsplit(".", 1)[-1].upper() if "." in (file.filename or "") else "FILE")
+    db.add(models.Asset(project_id=t.project_id, name=f"[{t.title}] {file.filename or '成果'}",
+                        asset_type=ext, file_path=path, kind="submission"))
+    res = quote_service.submit_task(db, task_id, note=note, filename=file.filename or "成果文件",
+                                    file_path=path, submitter=submitter)
+    return {"status": "ok", "result": res}
+
+@app.get("/api/tasks/{task_id}/submission")
+def download_submission(task_id: int, db: Session = Depends(get_db)):
+    t = db.query(models.Task).filter(models.Task.id == task_id).first()
+    if not t or not t.submission_file or not Path(t.submission_file).exists():
+        raise HTTPException(status_code=404, detail="没有成果文件")
+    dispo = f"attachment; filename*=UTF-8''{_urlquote(t.submission_filename or '成果文件')}"
+    return FileResponse(t.submission_file, headers={"Content-Disposition": dispo})
+
+@app.post("/api/tasks/{task_id}/approve")
+def approve_task_api(task_id: int, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.approve_task(db, task_id)}
+
+@app.post("/api/tasks/{task_id}/reject")
+def reject_task_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):
+    return {"status": "ok", "result": quote_service.reject_task(db, task_id, req.note)}
 
 @app.post("/api/tasks/{task_id}/feedback")
 def task_feedback_api(task_id: int, req: TaskNote, db: Session = Depends(get_db)):

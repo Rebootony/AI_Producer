@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Project } from '../../store/useStore';
-import { Wand2, Loader2, AlertTriangle, Download, RotateCcw, Lock, Unlock, Trash2, Plus, Target } from 'lucide-react';
+import { Wand2, Loader2, AlertTriangle, Download, RotateCcw, Lock, Unlock, Trash2, Plus, Target, ChevronUp, ChevronDown } from 'lucide-react';
 import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
 
 interface QuoteItem {
@@ -90,6 +90,11 @@ export function BudgetTab({ project }: { project: Project }) {
   const removeItem = async (id: number) => {
     lastUserTs.current = Date.now();
     await fetch(`/api/projects/${project.id}/quote/items/${id}`, { method: 'DELETE' });
+    lastUserTs.current = 0; await fetchQuote();
+  };
+  const moveItem = async (id: number, direction: 'up' | 'down') => {
+    lastUserTs.current = Date.now();
+    await fetch(`/api/projects/${project.id}/quote/items/${id}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) });
     lastUserTs.current = 0; await fetchQuote();
   };
   const [targetPrice, setTargetPrice] = useState('');
@@ -241,7 +246,9 @@ export function BudgetTab({ project }: { project: Project }) {
                         {internal && <td className="p-3 text-right text-zinc-500">{pct(r.gross_margin)}</td>}
                         {internal && (
                           <td className="p-3">
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center justify-center gap-0.5">
+                              <button onClick={() => moveItem(r.id, 'up')} title="上移" className="p-1 rounded text-zinc-300 hover:text-zinc-600 hover:bg-zinc-100"><ChevronUp size={14} /></button>
+                              <button onClick={() => moveItem(r.id, 'down')} title="下移" className="p-1 rounded text-zinc-300 hover:text-zinc-600 hover:bg-zinc-100"><ChevronDown size={14} /></button>
                               <button onClick={() => patchItem(r.id, { is_locked: !r.is_locked })} title={r.is_locked ? '解锁' : '锁定价格'} className={`p-1 rounded ${r.is_locked ? 'text-amber-500 hover:bg-amber-50' : 'text-zinc-300 hover:text-zinc-500 hover:bg-zinc-100'}`}>
                                 {r.is_locked ? <Lock size={14} /> : <Unlock size={14} />}
                               </button>

@@ -154,8 +154,12 @@ class Task(Base):
     deadline = Column(String, default="")           # 截止/结束 YYYY-MM-DD
     priority = Column(String, default="中")          # 高/中/低
     status = Column(String, default="pending")       # pending/in_progress/submitted/done/revision/delayed
-    ai_note = Column(String, default="")             # AI 项目经理修改意见
+    ai_note = Column(String, default="")             # 项目经理 Noah 的修改意见 / 退回原因
     submission = Column(String, default="")          # 员工提交说明
+    submission_file = Column(String, default="")     # 成果文件存储路径（§5 上传成果）
+    submission_filename = Column(String, default="") # 成果文件名
+    submitted_at = Column(String, default="")        # 提交时间
+    submitter = Column(String, default="")           # 提交人
     # —— §6 任务卡片全字段 ——
     collaborators = Column(String, default="")       # 协作人
     background = Column(String, default="")          # 任务背景

@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { CheckCircle2, Clock, AlertTriangle, Upload, MessageSquare, Inbox, CalendarClock, Bot } from 'lucide-react';
+import { CheckCircle2, Clock, AlertTriangle, Upload, MessageSquare, Inbox, CalendarClock, Bot, FileCheck, Download, Loader2 } from 'lucide-react';
 import { cn } from '../utils';
 
 interface Task {
@@ -8,9 +8,10 @@ interface Task {
   stage: string; deliverable: string; start_date: string; deadline: string; priority: string; status: string;
   ai_note: string; submission: string;
   collaborators: string; background: string; requirements: string; ref_material: string;
+  has_file: boolean; submission_filename: string; submitted_at: string; submitter: string;
 }
 
-const STATUS_CN: Record<string, string> = { pending: '待办', in_progress: '进行中', submitted: '已提交', done: '已完成', revision: '待修改' };
+const STATUS_CN: Record<string, string> = { pending: '未开始', in_progress: '进行中', submitted: '待审核', done: '已完成', revision: '需修改', delayed: '已逾期' };
 const PRIO_CLS: Record<string, string> = { 高: 'bg-red-50 text-red-600', 中: 'bg-amber-50 text-amber-600', 低: 'bg-zinc-100 text-zinc-500' };
 
 function deadlineInfo(d: string) {
@@ -39,11 +40,22 @@ export function EmployeeWorkbench() {
     return () => clearInterval(id);
   }, [fetchTasks]);
 
-  const submit = async (t: Task) => {
-    const note = window.prompt(`提交「${t.title}」的成果说明（可留空）：`, '');
-    if (note === null) return;
-    await fetch(`/api/tasks/${t.id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
-    await fetchTasks();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef<Task | null>(null);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const pickFile = (t: Task) => { pendingRef.current = t; fileRef.current?.click(); };
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; e.target.value = '';
+    const t = pendingRef.current;
+    if (!f || !t) return;
+    const note = window.prompt(`「${t.title}」成果说明（可留空）：`, '') ?? '';
+    setUploadingId(t.id);
+    const fd = new FormData(); fd.append('file', f);
+    const q = new URLSearchParams({ note, submitter: (currentUser?.name || '张导').split('｜')[0] }).toString();
+    try {
+      await fetch(`/api/tasks/${t.id}/upload?${q}`, { method: 'POST', body: fd });
+      await fetchTasks();
+    } finally { setUploadingId(null); pendingRef.current = null; }
   };
   const feedback = async (t: Task) => {
     const note = window.prompt(`就「${t.title}」向项目经理诺亚反馈什么问题？`, '');
@@ -65,6 +77,8 @@ export function EmployeeWorkbench() {
 
   return (
     <div className="flex-1 overflow-y-auto bg-zinc-50/50 p-8">
+      <input ref={fileRef} type="file" className="hidden" onChange={onFile}
+        accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.rar,.txt,.md,.psd,.ai,.mp4,.mov" />
       <div className="max-w-4xl mx-auto animate-in fade-in duration-500">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-zinc-900">我的任务工作台</h1>
@@ -103,8 +117,8 @@ export function EmployeeWorkbench() {
           </div>
         )}
 
-        {active.length > 0 && <Section title="待办与进行中">{active.map((t) => <Card key={t.id} t={t} onStart={start} onSubmit={submit} onFeedback={feedback} />)}</Section>}
-        {submitted.length > 0 && <Section title="已提交 · 等待审核">{submitted.map((t) => <Card key={t.id} t={t} onSubmit={submit} onFeedback={feedback} />)}</Section>}
+        {active.length > 0 && <Section title="待办与进行中">{active.map((t) => <Card key={t.id} t={t} onStart={start} onSubmit={pickFile} onFeedback={feedback} uploading={uploadingId === t.id} />)}</Section>}
+        {submitted.length > 0 && <Section title="已提交 · 等待诺亚 / 老板审核">{submitted.map((t) => <Card key={t.id} t={t} onSubmit={pickFile} onFeedback={feedback} uploading={uploadingId === t.id} />)}</Section>}
         {done.length > 0 && <Section title="已完成">{done.map((t) => <Card key={t.id} t={t} onFeedback={feedback} />)}</Section>}
       </div>
     </div>
@@ -120,10 +134,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Card({ t, onStart, onSubmit, onFeedback }: { t: Task; onStart?: (t: Task) => void; onSubmit?: (t: Task) => void; onFeedback?: (t: Task) => void }) {
+function Card({ t, onStart, onSubmit, onFeedback, uploading }: { t: Task; onStart?: (t: Task) => void; onSubmit?: (t: Task) => void; onFeedback?: (t: Task) => void; uploading?: boolean }) {
   const di = deadlineInfo(t.deadline);
   return (
-    <div className={cn('bg-white rounded-2xl border shadow-sm p-5', t.status === 'revision' ? 'border-amber-200' : 'border-zinc-200')}>
+    <div className={cn('bg-white rounded-2xl border shadow-sm p-5', t.status === 'revision' ? 'border-red-200' : 'border-zinc-200')}>
       <div className="flex items-start justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -146,12 +160,19 @@ function Card({ t, onStart, onSubmit, onFeedback }: { t: Task; onStart?: (t: Tas
       {t.ref_material && <p className="text-xs text-zinc-400 mt-1">参考资料：{t.ref_material}</p>}
 
       {t.ai_note && (
-        <div className="mt-3 bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm">
-          <span className="font-medium text-amber-700 flex items-center mb-1"><Bot size={14} className="mr-1.5" />诺亚的修改意见</span>
-          <span className="text-amber-800">{t.ai_note}</span>
+        <div className="mt-3 bg-red-50 border border-red-100 rounded-lg p-3 text-sm">
+          <span className="font-medium text-red-700 flex items-center mb-1"><Bot size={14} className="mr-1.5" />诺亚已退回 · 修改意见</span>
+          <span className="text-red-800">{t.ai_note}</span>
         </div>
       )}
-      {t.submission && t.status !== 'pending' && (
+      {t.has_file && (
+        <a href={`/api/tasks/${t.id}/submission`} className="mt-3 inline-flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 hover:bg-blue-100">
+          <FileCheck size={14} />已提交成果：{t.submission_filename}
+          <span className="text-xs text-blue-400">{t.submitted_at}</span>
+          <Download size={13} />
+        </a>
+      )}
+      {t.submission && t.status !== 'pending' && !t.has_file && (
         <p className="mt-2 text-xs text-zinc-400">我的提交：{t.submission}</p>
       )}
 
@@ -160,8 +181,8 @@ function Card({ t, onStart, onSubmit, onFeedback }: { t: Task; onStart?: (t: Tas
           <button onClick={() => onStart(t)} className="text-sm px-3 py-1.5 rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50">开始任务</button>
         )}
         {onSubmit && (
-          <button onClick={() => onSubmit(t)} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center">
-            <Upload size={14} className="mr-1.5" />{t.status === 'submitted' ? '重新提交' : '提交成果'}
+          <button onClick={() => onSubmit(t)} disabled={uploading} className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 inline-flex items-center disabled:opacity-60">
+            {uploading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Upload size={14} className="mr-1.5" />}{uploading ? '上传中…' : (t.status === 'submitted' ? '重新提交' : t.status === 'revision' ? '修改后重交' : '上传成果')}
           </button>
         )}
         {onFeedback && (

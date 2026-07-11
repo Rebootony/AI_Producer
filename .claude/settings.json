@@ -72,7 +72,8 @@
       "Bash(python3 -c ' *)",
       "Bash(./venv/bin/python -c ' *)",
       "Bash(timeout 300 ./venv/bin/python _fulltest.py)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(echo \"tsc: $?\")"
     ]
   }
 }

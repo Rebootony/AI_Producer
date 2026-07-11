@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { cn } from '../../utils';
 import { Project, useStore } from '../../store/useStore';
-import { CheckCircle2, Wand2, Loader2, Star, Users, Flag, Download, List, Pencil } from 'lucide-react';
+import { CheckCircle2, Wand2, Loader2, Star, Users, Flag, Download, List, Pencil, AlertTriangle } from 'lucide-react';
 import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
 import { ScheduleEditor } from '../ScheduleEditor';
+import { displayStatus } from '../../taskStatus';
 
 interface SchedItem {
   id: number; stage: string; task: string; start_date: string; end_date: string;
@@ -20,6 +21,7 @@ const stageColor: Record<string, string> = {
 
 export function TimelineTab({ project }: { project: Project }) {
   const [data, setData] = useState<SchedData | null>(null);
+  const [taskList, setTaskList] = useState<any[]>([]);   // 真实任务状态，用于覆盖时间线（§4：不再按日期显示假对勾）
   const [generating, setGenerating] = useState(false);
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const isBoss = useStore(s => s.currentUser?.role === 'boss');
@@ -28,6 +30,8 @@ export function TimelineTab({ project }: { project: Project }) {
     try {
       const res = await fetch(`/api/projects/${project.id}/schedule?t=${Date.now()}`);
       if (res.ok) setData(await res.json());
+      const tr = await fetch(`/api/projects/${project.id}/task-schedule?t=${Date.now()}`);
+      if (tr.ok) setTaskList((await tr.json()).tasks || []);
     } catch { /* ignore */ }
   }, [project.id]);
 
@@ -115,16 +119,27 @@ export function TimelineTab({ project }: { project: Project }) {
       </div>
 
       <div className="relative border-l-2 border-zinc-200 ml-3 space-y-5 pb-4">
-        {data.items.map((it) => (
+        {data.items.map((it, i) => {
+          // 用真实任务状态覆盖（按标题优先、否则按顺序匹配）——不再按日期显示假对勾
+          const task = taskList.find((t) => t.title === it.task) || taskList[i];
+          const done = task ? task.status === 'done' : it.status === 'completed';
+          const overdue = task ? task.overdue : false;
+          const inProgress = task ? task.status === 'in_progress' : it.status === 'current';
+          const submitted = task ? task.status === 'submitted' : false;
+          const st = task ? displayStatus(task.status, task.overdue) : null;
+          return (
           <div key={it.id} className="relative pl-7">
             <div className={cn(
               "absolute -left-[9px] top-2 w-4 h-4 rounded-full border-4 border-white shadow-sm",
-              it.status === 'completed' ? "bg-green-500" :
-              it.status === 'current' ? "bg-blue-600 ring-4 ring-blue-100" : "bg-zinc-300"
+              overdue ? "bg-red-500 ring-4 ring-red-100" :
+              done ? "bg-green-500" :
+              submitted ? "bg-amber-500" :
+              inProgress ? "bg-blue-600 ring-4 ring-blue-100" : "bg-zinc-300"
             )} />
             <div className={cn(
               "bg-white p-4 rounded-xl border shadow-sm flex items-center justify-between",
-              it.status === 'current' ? "border-blue-200 ring-1 ring-blue-50" :
+              overdue ? "border-red-200 ring-1 ring-red-50" :
+              inProgress ? "border-blue-200 ring-1 ring-blue-50" :
               it.is_milestone ? "border-amber-200" : "border-zinc-200"
             )}>
               <div className="flex items-center gap-3">
@@ -141,14 +156,16 @@ export function TimelineTab({ project }: { project: Project }) {
                 </div>
               </div>
               <div className="shrink-0">
-                {it.status === 'completed' ? <CheckCircle2 size={18} className="text-green-500" />
-                  : it.status === 'current' ? <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">进行中</span>
+                {overdue ? <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full inline-flex items-center"><AlertTriangle size={12} className="mr-1" />已逾期</span>
+                  : done ? <CheckCircle2 size={18} className="text-green-500" />
+                  : st ? <span className={cn("text-xs font-medium px-2 py-1 rounded-full", st.style)}>{st.label}</span>
                   : it.stage === '交付' ? <Flag size={16} className="text-orange-500" />
-                  : <span className="text-xs text-zinc-400">待办</span>}
+                  : <span className="text-xs text-zinc-400">未开始</span>}
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       <p className="text-xs text-zinc-400 mt-4 ml-3">提示：可在对话里让 AI 调整，如「拍摄加一天」会同时影响排期与 B 段报价（关键节点变更需二次确认）。</p>
       </>

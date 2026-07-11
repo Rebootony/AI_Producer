@@ -35,7 +35,7 @@ export function ChatSidebar({ onCollapse }: { onCollapse?: () => void }) {
         }));
         if (mapped.length === 0) {
           if (useStore.getState().messages.length !== 1 || useStore.getState().messages[0].id !== 'init') {
-            setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的 AI 项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
+            setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
           }
         } else {
           const currentMessages = useStore.getState().messages;
@@ -57,7 +57,7 @@ export function ChatSidebar({ onCollapse }: { onCollapse?: () => void }) {
     // 仅当切换到“别的项目”时才清空（避免显示上一个项目的对话）；切看板/对话回来不清空，保留对话与思考气泡
     const belongsTo = useStore.getState().chatProjectId;
     if (belongsTo !== (currentProjectId || 'p1')) {
-      setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的 AI 项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
+      setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
     }
     fetchMessages();
     const intervalId = setInterval(() => { fetchMessages(); }, 3000);
@@ -120,7 +120,7 @@ export function ChatSidebar({ onCollapse }: { onCollapse?: () => void }) {
     try {
       await fetch(`/api/messages/${projectId}?session_id=${currentSessionId}`, { method: 'DELETE' });
     } catch { /* ignore */ }
-    setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的 AI 项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
+    setMessages([{ id: 'init', role: 'ai', content: '我是诺亚，你的项目经理。报价、排期、盯进度、盯风险都归我——直接说需求就行。', timestamp: new Date() }]);
   };
 
   // 思考气泡：仅在「当前项目」有在处理的请求，或当前项目最后一条是用户发的（还没等到回复）时显示——按项目隔离，切到别的项目不会误显示
@@ -144,7 +144,7 @@ export function ChatSidebar({ onCollapse }: { onCollapse?: () => void }) {
             </h2>
             <p className="text-xs text-green-600 flex items-center">
               <span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span>
-              AI 项目经理 · 随时在线
+              项目经理 · 随时在线
             </p>
           </div>
         </div>
