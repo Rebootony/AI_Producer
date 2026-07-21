@@ -24,7 +24,7 @@ function App() {
     return (
       <div className="flex flex-col h-screen w-full bg-white overflow-hidden font-sans">
         <header className="h-14 bg-zinc-900 text-white flex items-center px-6 shrink-0 z-10 border-b border-zinc-800">
-          <span className="font-bold tracking-wide">AI PRODUCER</span>
+          <span className="font-bold tracking-wide">Noah</span>
           <span className="ml-2 text-xs text-zinc-500">执行端</span>
           <span className="ml-6 text-sm text-zinc-300 inline-flex items-center"><ClipboardList size={15} className="mr-1.5 text-blue-400" />我的任务台</span>
           <button
@@ -62,7 +62,7 @@ function App() {
       <header className="h-14 bg-zinc-900 text-white flex items-center px-4 shrink-0 z-10 border-b border-zinc-800">
         <div className="w-20 shrink-0"></div> {/* Spacer for sidebar */}
         <div className="flex items-center space-x-2">
-          <span className="font-bold tracking-wide">AI PRODUCER</span>
+          <span className="font-bold tracking-wide">Noah</span>
         </div>
         
         <div className="ml-10 flex items-center space-x-2">

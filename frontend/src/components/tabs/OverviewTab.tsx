@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Target, Clock, DollarSign, Building, Wand2, Loader2, CheckCircle2, FileText, Upload, Save, Pencil } from 'lucide-react';
+import { Clock, DollarSign, PieChart, Wand2, Loader2, CheckCircle2, FileText, Upload, Save, Pencil, ChevronRight } from 'lucide-react';
 import { Project, useStore } from '../../store/useStore';
 import { GenerationOverlay, complexityOf, DURATION_MS } from '../GenerationOverlay';
 import { ExecutionBoard } from '../ExecutionBoard';
@@ -17,7 +17,7 @@ const wan = (n: number) => (n / 10000).toFixed(1) + ' 万';
 export function OverviewTab({ project }: { project: Project }) {
   const [p, setP] = useState<BackendProject | null>(null);
   const [generating, setGenerating] = useState(false);
-  const { updateProject, currentUser } = useStore();
+  const { updateProject, currentUser, setActiveTab } = useStore();
   const isBoss = currentUser?.role === 'boss';
 
   const fetchProject = useCallback(async () => {
@@ -104,9 +104,10 @@ export function OverviewTab({ project }: { project: Project }) {
   };
 
   const generated = p?.generated;
-  const goalParts = (p?.goal || '品牌宣传').split(/[：:]/);
-  const goalMain = goalParts[0];
-  const goalSub = goalParts.slice(1).join('：') || (p?.film_type || '');
+  // 一至两行的 Brief 摘要（优先用 Brief 原文，否则由关键字段合成）
+  const briefSummary = p?.brief_text
+    ? (p.brief_text.length > 96 ? p.brief_text.slice(0, 96) + '…' : p.brief_text)
+    : (p ? `${p.film_type}，约 ${p.duration_minutes} 分钟，拍摄 ${p.shoot_days} 天，${p.delivery_date} 前交付` : '读取中…');
 
   return (
     <div className="p-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -116,13 +117,15 @@ export function OverviewTab({ project }: { project: Project }) {
           <CheckCircle2 size={16} className="mr-2 text-green-400" />{toast}
         </div>
       )}
-      <div className="mb-6 flex items-start justify-between">
-        <div>
+      <div className="mb-5 flex items-start justify-between">
+        <div className="min-w-0 mr-4">
           <h1 className="text-2xl font-bold text-zinc-900">{p?.name || project.name}</h1>
-          <p className="text-zinc-500 mt-2">基于客户 Brief 由项目经理诺亚智能提取与核算</p>
+          <p className="text-zinc-500 mt-2 text-sm leading-relaxed">
+            <span className="text-zinc-400">项目 Brief：</span>{briefSummary}
+          </p>
         </div>
-        <span className={`text-xs px-3 py-1.5 rounded-full font-medium ${generated ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-          {generated ? '已生成报价 + 排期' : '待生成'}
+        <span className={`shrink-0 text-xs px-3 py-1.5 rounded-full font-medium ${generated ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+          {generated ? '诺亚已完成报价+排期' : '待诺亚生成'}
         </span>
       </div>
 
@@ -132,8 +135,8 @@ export function OverviewTab({ project }: { project: Project }) {
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0"><Wand2 size={24} /></div>
             <div>
-              <h3 className="font-semibold text-lg">一键生成报价 + 排期</h3>
-              <p className="text-sm text-blue-100 mt-1 max-w-lg">已读取该项目 Brief。AI 将按价格单拆解 4 段成本、核算实收，并按交付日倒推排期。</p>
+              <h3 className="font-semibold text-lg">让诺亚生成报价 + 排期</h3>
+              <p className="text-sm text-blue-100 mt-1 max-w-lg">诺亚已读取该项目 Brief，将按价格单拆解 4 段成本、核算实收，并按交付日倒推排期。</p>
             </div>
           </div>
           <button onClick={generate} disabled={generating}
@@ -144,17 +147,19 @@ export function OverviewTab({ project }: { project: Project }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-6 mb-8">
-        <Card icon={<Building size={24} />} color="blue" label="客户信息"
-          main={p?.client || project.client} sub={p?.industry || project.industry} />
+      <div className="grid grid-cols-3 gap-5 mb-8">
         <Card icon={<DollarSign size={24} />} color="green" label="对客户报价（实收）"
           main={!isBoss ? '🔒 仅老板可见' : generated ? '¥ ' + wan(p!.client_price) : '— 待生成'}
-          sub={!isBoss ? '预算信息对员工隐藏' : generated ? `成本 ¥ ${wan(p!.cost_total)} · 利润率 ${Math.round((p!.margin_rate) * 100)}%` : '生成后显示'} />
+          sub={!isBoss ? '预算对员工隐藏' : generated ? '点击查看报价明细' : '生成后显示'}
+          onClick={isBoss ? () => setActiveTab('budget') : undefined} />
+        <Card icon={<PieChart size={24} />} color="purple" label="成本 / 利润率"
+          main={!isBoss ? '🔒 仅老板可见' : generated ? `${Math.round((p!.margin_rate) * 100)}%` : '—'}
+          sub={!isBoss ? '' : generated ? `成本 ¥ ${wan(p!.cost_total)} · 点击进入预算` : '生成后显示'}
+          onClick={isBoss ? () => setActiveTab('budget') : undefined} />
         <Card icon={<Clock size={24} />} color="orange" label="交付时间"
           main={p?.delivery_date || project.deliveryDate}
-          sub={p ? `${p.film_type} · 约 ${p.duration_minutes} 分钟 · 拍摄 ${p.shoot_days} 天` : ''} />
-        <Card icon={<Target size={24} />} color="purple" label="核心目标"
-          main={goalMain} sub={goalSub} />
+          sub={p ? `拍摄 ${p.shoot_days} 天 · 点击看排期` : '点击看排期'}
+          onClick={() => setActiveTab('timeline')} />
       </div>
 
       {/* 诺亚推来的决策方案卡片（仅老板，确认/驳回/要求补充） */}
@@ -209,19 +214,22 @@ export function OverviewTab({ project }: { project: Project }) {
   );
 }
 
-function Card({ icon, color, label, main, sub }: { icon: React.ReactNode; color: string; label: string; main: string; sub: string }) {
+function Card({ icon, color, label, main, sub, onClick }: { icon: React.ReactNode; color: string; label: string; main: string; sub: string; onClick?: () => void }) {
   const colors: Record<string, string> = {
     blue: 'bg-blue-50 text-blue-600', green: 'bg-green-50 text-green-600',
     orange: 'bg-orange-50 text-orange-600', purple: 'bg-purple-50 text-purple-600',
   };
+  const clickable = !!onClick;
   return (
-    <div className="p-6 bg-white rounded-2xl border border-zinc-200 shadow-sm flex items-start space-x-4">
+    <div onClick={onClick}
+      className={`p-6 bg-white rounded-2xl border border-zinc-200 shadow-sm flex items-start space-x-4 relative ${clickable ? 'cursor-pointer hover:shadow-md hover:border-blue-300 transition-all group' : ''}`}>
       <div className={`p-3 rounded-xl ${colors[color]}`}>{icon}</div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-zinc-500 mb-1">{label}</p>
         <p className="font-semibold text-zinc-900 truncate">{main}</p>
         <p className="text-sm text-zinc-500 mt-0.5">{sub}</p>
       </div>
+      {clickable && <ChevronRight size={16} className="absolute top-4 right-4 text-zinc-300 group-hover:text-blue-500 transition-colors" />}
     </div>
   );
 }

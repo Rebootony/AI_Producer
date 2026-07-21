@@ -122,7 +122,7 @@ export function BudgetTab({ project }: { project: Project }) {
         <div className="bg-white rounded-2xl border border-dashed border-zinc-300 p-12 text-center">
           <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-5"><Wand2 size={26} /></div>
           <h3 className="text-lg font-semibold text-zinc-900 mb-2">还没有报价单</h3>
-          <p className="text-sm text-zinc-500 mb-6 max-w-md mx-auto">点击下方按钮，AI 将根据《{project.name}》的 Brief 自动拆解 4 段成本、按价格单算钱，并同步生成执行排期。</p>
+          <p className="text-sm text-zinc-500 mb-6 max-w-md mx-auto">点击下方按钮，诺亚将根据《{project.name}》的 Brief 拆解 4 段成本、按价格单算钱，并同步生成执行排期。</p>
           <button onClick={runGenerate} disabled={generating} className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-60">
             {generating ? <Loader2 size={18} className="mr-2 animate-spin" /> : <Wand2 size={18} className="mr-2" />}{generating ? 'AI 正在生成…' : '一键按 Brief 生成报价 + 排期'}
           </button>

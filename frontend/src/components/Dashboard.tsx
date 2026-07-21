@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from '../store/useStore';
-import { Briefcase, TrendingUp, PieChart, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Briefcase, TrendingUp, PieChart, ChevronRight, Bell } from 'lucide-react';
 import { cn } from '../utils';
 
 interface DashProject {
   id: string; name: string; client: string; industry: string; delivery_date: string;
   generated: boolean; client_price: number; cost_total: number; margin_rate: number;
-  shoot_days: number; health: string;
+  shoot_days: number; health: string; overdue: number;
 }
+interface DashAlert { project_id: string; name: string; kind: string; text: string; }
 interface DashData {
   projects: DashProject[]; count: number; total_client_price: number;
-  total_cost: number; total_profit: number; risk_count: number;
+  total_cost: number; total_profit: number; risk_count: number; alerts: DashAlert[];
 }
 
 const wan = (n: number) => (n / 10000).toFixed(1);
@@ -37,24 +38,46 @@ export function Dashboard() {
   const totalPrice = data?.total_client_price || 0;
   const totalProfit = data?.total_profit || 0;
   const genCount = projects.filter(p => p.generated).length;
+  const alerts = data?.alerts || [];
+  const name = (currentUser?.name || '').replace(/^张/, '') || currentUser?.name;
 
   return (
     <div className="flex-1 overflow-y-auto bg-zinc-50/50 p-8">
       <div className="max-w-6xl mx-auto animate-in fade-in duration-500">
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold text-zinc-900">全局项目大盘</h1>
-          <p className="text-zinc-500 mt-2">项目经理诺亚为你统筹多个项目的报价、排期、进度与利润。</p>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-zinc-900">{name}，欢迎回来</h1>
+          <p className="text-zinc-500 mt-1.5">诺亚已帮你盯好在管项目的报价、进度与风险。</p>
         </div>
 
-        <div className="grid grid-cols-4 gap-6 mb-10">
-          <Metric icon={<Briefcase size={20} />} color="blue" label="活跃项目总数"
+        {/* Noah 提醒你：把风险统一收进提醒区（不再单独占经营指标卡） */}
+        {isBoss && alerts.length > 0 && (
+          <div className="mb-8 bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
+            <div className="bg-amber-50 px-5 py-3 flex items-center gap-2 border-b border-amber-100">
+              <Bell size={16} className="text-amber-600" />
+              <span className="font-semibold text-amber-900">诺亚提醒你</span>
+              <span className="text-xs text-amber-700">今天有 {alerts.length} 项需要关注</span>
+            </div>
+            <div className="divide-y divide-zinc-100">
+              {alerts.map((a, i) => (
+                <button key={i} onClick={() => setCurrentProject(a.project_id)}
+                  className="w-full flex items-center gap-2 px-5 py-2.5 text-left hover:bg-zinc-50 transition-colors">
+                  <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', a.kind === 'overdue' ? 'bg-red-500' : 'bg-amber-500')} />
+                  <span className="text-sm text-zinc-700 flex-1">{a.text}</span>
+                  <ChevronRight size={15} className="text-zinc-300" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 三项经营指标 */}
+        <div className="grid grid-cols-3 gap-6 mb-10">
+          <Metric icon={<Briefcase size={20} />} color="blue" label="活跃项目"
             value={`${data?.count ?? '—'}`} tag={`${genCount} 已出报价`} />
-          <Metric icon={<TrendingUp size={20} />} color="green" label="在管报价总额（实收）"
+          <Metric icon={<TrendingUp size={20} />} color="green" label="报价总额（实收）"
             value={isBoss ? `¥ ${wan(totalPrice)}w` : '🔒 仅老板'} />
-          <Metric icon={<PieChart size={20} />} color="purple" label="预估总利润"
+          <Metric icon={<PieChart size={20} />} color="purple" label="预计总利润"
             value={isBoss ? `¥ ${wan(totalProfit)}w` : '🔒 仅老板'} />
-          <Metric icon={<AlertTriangle size={20} />} color="orange" label="低毛利预警"
-            value={isBoss ? `${data?.risk_count ?? 0}` : '🔒'} tag={isBoss && data && data.risk_count > 0 ? '需关注' : undefined} />
         </div>
 
         <div>

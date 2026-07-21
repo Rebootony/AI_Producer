@@ -55,7 +55,7 @@ export function AssetsTab({ project }: { project: Project }) {
       <div className="mb-8 flex justify-between items-end">
         <div>
           <h2 className="text-2xl font-bold text-zinc-900">资产管理</h2>
-          <p className="text-zinc-500 mt-2">平台生成的报价/排期可随时下载当前状态；也可上传项目相关文件集中沉淀。</p>
+          <p className="text-zinc-500 mt-2">诺亚生成的报价/排期可随时下载当前状态；也可上传项目相关文件集中沉淀。</p>
         </div>
         <input ref={fileRef} type="file" className="hidden" onChange={onUpload} />
         <button onClick={() => fileRef.current?.click()} disabled={uploading}
@@ -68,7 +68,7 @@ export function AssetsTab({ project }: { project: Project }) {
       {/* 平台生成（下载当前状态） */}
       <div className="mb-8">
         <h3 className="text-sm font-semibold text-zinc-500 mb-3 flex items-center">
-          <Sparkles size={15} className="mr-1.5 text-blue-500" />平台生成（下载当前状态）
+          <Sparkles size={15} className="mr-1.5 text-blue-500" />诺亚生成（下载当前状态）
         </h3>
         {generated ? (
           <div className="grid grid-cols-3 gap-4">

@@ -701,21 +701,32 @@ async def upload_brief(project_id: str, file: UploadFile = File(...), db: Sessio
 
 @app.get("/api/dashboard")
 def dashboard(db: Session = Depends(get_db)):
+    from datetime import date as _d
+    today = _d.today().isoformat()
     projects = db.query(models.Project).all()
     items = []
     total_price = 0.0
     total_cost = 0.0
     risk = 0
+    alerts = []   # Noah 提醒你：需关注的项目
     for p in projects:
         low_margin = bool(p.generated and (p.margin_rate or 0) < 0.15)
+        overdue = db.query(models.Task).filter(
+            models.Task.project_id == p.id, models.Task.deadline != "",
+            models.Task.deadline < today, models.Task.status != "done").count()
         if low_margin:
             risk += 1
+            alerts.append({"project_id": p.id, "name": p.name, "kind": "low_margin",
+                           "text": f"{p.name} 的利润率偏低（{round((p.margin_rate or 0)*100)}%）"})
+        if overdue > 0:
+            alerts.append({"project_id": p.id, "name": p.name, "kind": "overdue",
+                           "text": f"{p.name} 有 {overdue} 个执行节点已逾期"})
         items.append({
             "id": p.id, "name": p.name, "client": p.client, "industry": p.industry,
             "delivery_date": p.delivery_date, "generated": bool(p.generated),
             "client_price": p.client_price, "cost_total": p.cost_total,
-            "margin_rate": p.margin_rate, "shoot_days": p.shoot_days,
-            "health": "warning" if low_margin else ("good" if p.generated else "planning"),
+            "margin_rate": p.margin_rate, "shoot_days": p.shoot_days, "overdue": overdue,
+            "health": "warning" if (low_margin or overdue) else ("good" if p.generated else "planning"),
         })
         total_price += p.client_price or 0
         total_cost += p.cost_total or 0
@@ -723,6 +734,7 @@ def dashboard(db: Session = Depends(get_db)):
         "projects": items, "count": len(projects),
         "total_client_price": total_price, "total_cost": total_cost,
         "total_profit": total_price - total_cost, "risk_count": risk,
+        "alerts": alerts,
     }
 
 class TaskNote(BaseModel):
@@ -774,8 +786,13 @@ def list_tasks(assignee: str = "employee", db: Session = Depends(get_db)):
 
 @app.get("/api/projects/{project_id}/execution")
 def project_execution(project_id: str, db: Session = Depends(get_db)):
-    """Boss 端执行看板：项目进度 + 每个人当前在做什么。"""
+    """Boss 端执行看板：项目进度 + 每条任务状态（含审核）。"""
     return quote_service.serialize_execution(db, project_id)
+
+@app.get("/api/projects/{project_id}/dynamics")
+def project_dynamics(project_id: str, db: Session = Depends(get_db)):
+    """执行动态：以人为核心，每个成员当前在做什么。"""
+    return quote_service.serialize_dynamics(db, project_id)
 
 @app.get("/api/projects/{project_id}/task-schedule")
 def project_task_schedule(project_id: str, db: Session = Depends(get_db)):

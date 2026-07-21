@@ -498,6 +498,76 @@ def _reschedule_from(db: Session, project_id: str, root_id: int) -> list:
     return shifted
 
 
+def serialize_dynamics(db: Session, project_id: str) -> dict:
+    """执行动态（§5，0719）：以【人】为核心——每个成员当前在做什么/进度/下一步/今日提交/风险/诺亚动作。
+    与执行排期（完整任务流）区分开。"""
+    from datetime import date
+    today = date.today().isoformat()
+    rows = (db.query(models.Task).filter(models.Task.project_id == project_id)
+              .order_by(models.Task.sort_order, models.Task.id).all())
+    members = db.query(models.TeamMember).filter(models.TeamMember.project_id == project_id).all()
+    role_of = {m.name: m.role for m in members}
+
+    def owner_for(t):
+        for m in members:
+            if m.stage and t.stage and (m.stage in t.stage or t.stage in m.stage) and m.stage != "全程":
+                return m.name
+        return "张导" if t.assignee == "employee" else (t.assignee or "—")
+
+    groups, order = {}, []
+    for t in rows:
+        o = owner_for(t)
+        if o not in groups:
+            groups[o] = []
+            order.append(o)
+        groups[o].append(t)
+
+    people = []
+    for o in order:
+        ts = groups[o]
+        done = [t for t in ts if t.status == "done"]
+        cur = (next((t for t in ts if t.status == "in_progress"), None)
+               or next((t for t in ts if t.status == "submitted"), None)
+               or next((t for t in ts if t.status == "revision"), None)
+               or next((t for t in ts if t.status == "pending"), None))
+        progress = round(len(done) / len(ts) * 100) if ts else 0
+        today_submit = next((t for t in ts if (t.submitted_at or "")[:10] == today), None)
+        base = {"name": o, "title": role_of.get(o, ""), "progress": progress,
+                "today_submit": (today_submit.submission_filename or today_submit.submission or "有提交") if today_submit else ""}
+        if not cur:
+            people.append({**base, "current_task": "本阶段任务已完成", "status": "done",
+                           "status_cn": "已完成", "deadline": "", "overdue": False,
+                           "next_task": "—", "risk": "", "noah_action": ""})
+            continue
+        overdue = bool(cur.deadline) and cur.deadline < today and cur.status != "done"
+        idx = ts.index(cur)
+        nxt = next((t for t in ts[idx + 1:] if t.status != "done"), None)
+        people.append({
+            **base, "current_task": cur.title,
+            "status": "delayed" if overdue else cur.status,
+            "status_cn": "已逾期" if overdue else _STATUS_CN.get(cur.status, cur.status),
+            "deadline": cur.deadline or "", "overdue": overdue,
+            "next_task": nxt.title if nxt else "—",
+            "risk": "节点已逾期" if overdue else "",
+            "noah_action": "诺亚正在复核" if cur.status == "submitted" else ("诺亚正在跟进" if overdue else ""),
+        })
+
+    review = [{
+        "id": t.id, "title": t.title, "owner": owner_for(t),
+        "submitter": t.submitter or "张导", "submitted_at": t.submitted_at or "",
+        "has_file": bool(t.submission_file), "submission_filename": t.submission_filename or "",
+        "submission": t.submission or "",
+    } for t in rows if t.status == "submitted"]
+
+    total = len(rows)
+    alldone = sum(1 for t in rows if t.status == "done")
+    return {"people": people, "pending_review": review, "progress": {
+        "total": total, "done": alldone,
+        "rate": round(alldone / total * 100) if total else 0,
+        "overdue": sum(1 for t in rows if t.deadline and t.deadline < today and t.status != "done"),
+    }}
+
+
 def update_task(db: Session, task_id: int, **fields) -> dict:
     t = db.query(models.Task).filter(models.Task.id == int(task_id)).first()
     if not t:
